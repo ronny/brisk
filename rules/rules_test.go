@@ -1,6 +1,7 @@
 package rules_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/ronny/brisk/internal/gitx"
@@ -78,5 +79,78 @@ func TestFindingsAndSessionAndConfig(t *testing.T) {
 	hits = rules.Apply(cs, nil, nil, rules.Config{PathRules: []risk.PathRule{{ID: "ledger", Paths: []string{"billing2/**"}, Floor: risk.High}}})
 	if rules.Floor(hits) != risk.High || hits[0].ID != "config:ledger" {
 		t.Fatalf(".brisk.yaml rule should set High: %+v", hits)
+	}
+}
+
+func protoChange(t *testing.T, old, new string) *risk.ChangeSet {
+	t.Helper()
+	// Rules read whole files for protobuf; the hunk only marks the file
+	// as changed.
+	raw := "diff --git a/api.proto b/api.proto\n--- a/api.proto\n+++ b/api.proto\n@@ -1 +1 @@\n-x\n+y\n"
+	files, err := gitx.ParseDiff([]byte(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	files[0].Old, files[0].New = []byte(old), []byte(new)
+	return &risk.ChangeSet{Files: files}
+}
+
+func TestProtoRenumbered(t *testing.T) {
+	const base = `syntax = "proto3";
+message Order {
+  string id = 1;
+  int64 total = 2; // cents
+  string customer = 3;
+  oneof pay {
+    string card = 4;
+  }
+  message Line {
+    string sku = 1;
+    int32 qty = 2;
+  }
+}
+message Supplier
+{
+  string code = 3 [(buf.validate.field).cel = {
+    id: "code"
+  }];
+  string id = 1;
+  string name = 2 [(buf.validate.field).required = true];
+}
+`
+	for _, tc := range []struct {
+		name, from, to string
+		want           bool
+	}{
+		{"swap two numbers", "int64 total = 2; // cents\n  string customer = 3;", "string customer = 2;\n  int64 total = 3; // cents", true},
+		{"add a field", "string customer = 3;", "string customer = 3;\n  string note = 5;", false},
+		{"rename keeps number and type", "string customer = 3;", "string customer_id = 3;", false},
+		{"reuse a number with another type", "string customer = 3;", "int64 customer_count = 3;", true},
+		{"change a type incompatibly", "string customer = 3;", "int64 customer = 3;", true},
+		{"widen int32 to int64", "int32 qty = 2;", "int64 qty = 2;", false},
+		{"braces and slashes in strings and comments", "string id = 1;\n  int64 total = 2; // cents", "string id = 1 [(x).doc = \"https://e.com/{id}\"]; /* { */\n  int64 total = 2; // cents", false},
+		{"renumber after an option with a URL", "string id = 1;\n  int64 total = 2; // cents", "option (x) = { doc: \"https://e.com\" };\n  string id = 1;\n  int64 total = 9; // cents", true},
+		{"renumber inside a oneof", "string card = 4;", "string card = 6;", true},
+		{"renumber in a nested message", "int32 qty = 2;", "int32 qty = 3;", true},
+		{"same name, other message, other number", "string name = 2 [(buf.validate.field).required = true];", "string name = 2 [\n    (buf.validate.field).required = true\n  ];", false},
+		{"renumber after multi-line options", "string name = 2 [(buf.validate.field).required = true];", "string name = 5 [(buf.validate.field).required = true];", true},
+		{"remove a whole message", "message Supplier\n{\n  string code = 3 [(buf.validate.field).cel = {\n    id: \"code\"\n  }];\n  string id = 1;\n  string name = 2 [(buf.validate.field).required = true];\n}\n", "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			to := strings.Replace(base, tc.from, tc.to, 1)
+			if to == base {
+				t.Fatal("bad test: replacement did nothing")
+			}
+			hits := rules.Apply(protoChange(t, base, to), nil, nil, rules.Config{})
+			got := false
+			for _, h := range hits {
+				if h.ID == "proto_renumbered" {
+					got = h.Tier == risk.High
+				}
+			}
+			if got != tc.want {
+				t.Fatalf("proto_renumbered %v, want %v (hits %+v)", got, tc.want, hits)
+			}
+		})
 	}
 }

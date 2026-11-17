@@ -271,6 +271,14 @@ func Apply(cs *risk.ChangeSet, findings []risk.Finding, session *risk.Session, c
 		}
 	}
 
+	for _, fc := range cs.Files {
+		if strings.HasSuffix(fc.Path, ".proto") {
+			for _, ev := range protoRenumbered(fc) {
+				add("proto_renumbered", risk.High, "Renumbers or reuses a protobuf field number", "rule", ev)
+			}
+		}
+	}
+
 	for _, f := range findings {
 		tier, ok := FindingTier[f.Kind]
 		if !ok || f.Kind == risk.ParseError {
@@ -294,6 +302,162 @@ func Apply(cs *risk.ChangeSet, findings []risk.Finding, session *risk.Session, c
 		return hits[i].ID < hits[j].ID
 	})
 	return hits
+}
+
+var (
+	protoField   = regexp.MustCompile(`^\s*(?:repeated\s+|optional\s+|required\s+)?([\w.]+(?:<[\w., ]+>)?)\s+(\w+)\s*=\s*(\d+)\s*[;\[]`)
+	protoMessage = regexp.MustCompile(`^\s*message\s+(\w+)\s*(\{)?`)
+)
+
+type protoFieldInfo struct {
+	num, typ string
+	line     int
+}
+
+// protoCode blanks out comments and string literals, keeping line breaks,
+// so braces and "//" inside them do not count.
+func protoCode(src []byte) []string {
+	var b strings.Builder
+	inBlock, inStr := false, byte(0)
+	for i := 0; i < len(src); i++ {
+		c := src[i]
+		switch {
+		case c == '\n':
+			b.WriteByte(c)
+			if inStr != 0 {
+				inStr = 0 // unterminated string: stop at the line end
+			}
+		case inBlock:
+			if c == '*' && i+1 < len(src) && src[i+1] == '/' {
+				inBlock = false
+				i++
+			}
+			b.WriteByte(' ')
+		case inStr != 0:
+			if c == '\\' {
+				i++
+			} else if c == inStr {
+				inStr = 0
+			}
+			b.WriteByte(' ')
+		case c == '"' || c == '\'':
+			inStr = c
+			b.WriteByte(' ')
+		case c == '/' && i+1 < len(src) && src[i+1] == '*':
+			inBlock = true
+			i++
+			b.WriteString("  ")
+		case c == '/' && i+1 < len(src) && src[i+1] == '/':
+			for i < len(src) && src[i] != '\n' {
+				i++
+			}
+			i--
+		default:
+			b.WriteByte(c)
+		}
+	}
+	return strings.Split(b.String(), "\n")
+}
+
+// protoFields maps "Message.Nested" to its fields by name. Fields inside a
+// oneof belong to the enclosing message. One field per line, as protoc
+// style has it.
+func protoFields(src []byte) map[string]map[string]protoFieldInfo {
+	out := map[string]map[string]protoFieldInfo{}
+	var stack []string // message name, or "" for any other block
+	pending := ""      // a message whose "{" is on a later line
+	for i, line := range protoCode(src) {
+		if m := protoField.FindStringSubmatch(line); m != nil {
+			var path []string
+			for _, s := range stack {
+				if s != "" {
+					path = append(path, s)
+				}
+			}
+			msg := strings.Join(path, ".")
+			if out[msg] == nil {
+				out[msg] = map[string]protoFieldInfo{}
+			}
+			out[msg][m[2]] = protoFieldInfo{num: m[3], typ: m[1], line: i + 1}
+		}
+		// Every brace opens or closes a block, including those in field
+		// options that span lines; a message's first brace opens it.
+		opens := strings.Count(line, "{")
+		if m := protoMessage.FindStringSubmatch(line); m != nil {
+			pending = m[1]
+		}
+		if pending != "" && opens > 0 {
+			stack = append(stack, pending)
+			pending = ""
+			opens--
+		}
+		for ; opens > 0; opens-- {
+			stack = append(stack, "")
+		}
+		for closes := strings.Count(line, "}"); closes > 0 && len(stack) > 0; closes-- {
+			stack = stack[:len(stack)-1]
+		}
+	}
+	return out
+}
+
+// protoWire groups scalar types that share a wire encoding, following the
+// protobuf language guide's compatibility rules. Other names are messages
+// or enums, which brisk cannot compare.
+var protoWire = map[string]string{
+	"int32": "varint", "uint32": "varint", "int64": "varint", "uint64": "varint", "bool": "varint",
+	"sint32": "zigzag", "sint64": "zigzag",
+	"string": "bytes", "bytes": "bytes",
+	"fixed32": "fixed32", "sfixed32": "fixed32", "float": "float",
+	"fixed64": "fixed64", "sfixed64": "fixed64", "double": "double",
+}
+
+// protoCompatible reports whether a field can change from type a to b
+// without breaking the wire format, as far as brisk can tell.
+func protoCompatible(a, b string) bool {
+	wa, sa := protoWire[a]
+	wb, sb := protoWire[b]
+	switch {
+	case a == b:
+		return true
+	case sa && sb:
+		return wa == wb
+	case !sa && !sb:
+		return true // two message or enum types: may be a rename
+	}
+	return false
+}
+
+// protoRenumbered compares each message's fields before and after. A field
+// whose number or wire type changed, or a number now used by a field of an
+// incompatible type, breaks every client and stored message. A field
+// renamed with the same number and a compatible type is not reported.
+func protoRenumbered(fc risk.FileChange) []risk.Evidence {
+	if len(fc.Old) == 0 || len(fc.New) == 0 {
+		return nil
+	}
+	before, after := protoFields(fc.Old), protoFields(fc.New)
+	var out []risk.Evidence
+	for msg, fields := range after {
+		old, ok := before[msg]
+		if !ok {
+			continue
+		}
+		byNum := map[string]protoFieldInfo{}
+		for _, f := range old {
+			byNum[f.num] = f
+		}
+		for name, f := range fields {
+			o, same := old[name]
+			prev, reused := byNum[f.num]
+			if same && (o.num != f.num || !protoCompatible(o.typ, f.typ)) ||
+				!same && reused && !protoCompatible(prev.typ, f.typ) {
+				out = append(out, risk.Evidence{Path: fc.Path, StartLine: f.line, EndLine: f.line, Symbol: msg + "." + name})
+			}
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].StartLine < out[j].StartLine })
+	return out
 }
 
 // FindingTier is the floor each kind of structural finding sets. Kinds that
