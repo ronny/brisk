@@ -49,6 +49,7 @@ type Prepared struct {
 	Floor     risk.Tier
 	Request   *risk.Request // nil when there is nothing to ask
 	RequestID string        // host.Key(Request): recorded answers are keyed by it
+	Policy    Policy
 	Timings   map[string]float64
 	started   time.Time
 }
@@ -87,7 +88,23 @@ func (e *Engine) Prepare(ctx context.Context, in Input) (*Prepared, error) {
 	}
 	lap("context", t)
 
+	if p.Policy, err = ResolvePolicy(p.Context.Policy); err == nil {
+		err = p.Policy.CheckIDs(rules.KnownIDs(), p.Context.SensitivePaths)
+	}
+	if err != nil {
+		return nil, fmt.Errorf(".brisk.yaml: %w", err)
+	}
 	p.Hits = rules.Apply(cs, p.Findings, in.Session, rules.Config{PathRules: p.Context.SensitivePaths})
+	for i, h := range p.Hits {
+		// A project rule hits as config:<id>; its id may be written either way.
+		if t, ok := p.Policy.RuleTiers[h.ID]; ok {
+			p.Hits[i].Tier = t
+		} else if id, ok := strings.CutPrefix(h.ID, "config:"); ok {
+			if t, ok := p.Policy.RuleTiers[id]; ok {
+				p.Hits[i].Tier = t
+			}
+		}
+	}
 	p.Floor = rules.Floor(p.Hits)
 
 	if len(cs.Files) > 0 {
@@ -333,6 +350,12 @@ func (p *Prepared) Finish(backend string, resp *risk.Response, degraded string) 
 			if !ok {
 				a.Provenance.Calibration += " (no table for " + calibration.Normalise(resp.Model) + ")"
 			}
+			if t, perr := p.Policy.Table(table); perr == nil {
+				table = t
+			} else {
+				a.Provenance.PolicyNote = perr.Error() + "; using the calibration's thresholds"
+			}
+			a.Provenance.Thresholds = map[string]float64{"medium": table.Thresholds.Medium, "high": table.Thresholds.High}
 			feats := Features(resp.Answers, p.History(), SizeFeature(a.Stats.Additions+a.Stats.Deletions))
 			r := table.Risk(feats)
 			shown := math.Round(r*1000) / 1000 // rounded for display only
@@ -360,7 +383,9 @@ func (p *Prepared) Finish(backend string, resp *risk.Response, degraded string) 
 	if a.Reasons == nil {
 		a.Reasons = []risk.Reason{}
 	}
-	a.Action = action(a.Tier)
+	a.Action = p.Policy.Actions[a.Tier]
+	a.AgentReview = p.Policy.AgentReview(a.Tier, a.Provenance.RuleHits, a.Provenance.Answers)
+	a.Provenance.Preset = p.Policy.Preset
 	a.Provenance.DurationMS = time.Since(p.started).Milliseconds()
 	return a
 }
@@ -447,16 +472,6 @@ func noul(a risk.Answer) float64 {
 		return 0
 	}
 	return *a.Noul
-}
-
-func action(t risk.Tier) string {
-	switch t {
-	case risk.High:
-		return "Get a second review of the listed reasons before shipping."
-	case risk.Medium:
-		return "Review the files named in the reasons before shipping."
-	}
-	return "No extra review needed."
 }
 
 func round2(x float64) float64 { return math.Round(x*100) / 100 }

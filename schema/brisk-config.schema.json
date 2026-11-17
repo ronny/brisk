@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ronny/brisk/schema/brisk-config.schema.json",
+  "title": "brisk project config (.brisk.yaml)",
+  "description": "Read from the base commit, so a change cannot loosen the rules that judge it. Every key is optional. Unknown keys, unknown rule IDs, out-of-range thresholds and a second YAML document are errors that stop every assessment until the base branch is fixed. A preset sets the policy, and the other policy keys adjust it.",
+  "type": "object",
+  "additionalProperties": false,
+  "$defs": {
+    "tier": { "enum": ["low", "medium", "high"] },
+    "share": { "type": "number", "minimum": 0, "maximum": 1 }
+  },
+  "properties": {
+    "sensitive_paths": {
+      "type": "array",
+      "description": "Project rules: changing a matching path sets at least this tier. They hit as config:<id>.",
+      "items": {
+        "type": "object",
+        "required": ["id", "paths", "floor"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string" },
+          "paths": { "type": "array", "items": { "type": "string" }, "description": "gitignore-style globs, ** allowed" },
+          "floor": { "$ref": "#/$defs/tier" },
+          "reason": { "type": "string" }
+        }
+      }
+    },
+    "preset": {
+      "enum": ["autonomous", "reviewed", "strict"],
+      "description": "autonomous: nobody reviews by hand; High (about 26% of changes in the evaluation) asks for an agent review. reviewed (default): human reviewers; the calibrated thresholds. strict: high-stakes code; wider Medium and High, and an agent review for every Medium or High change. The names match the Amp plugin's amp.brisk.preset."
+    },
+    "high_share": { "$ref": "#/$defs/share", "description": "Share of changes the model alone puts at High, through the calibration's risk quantiles" },
+    "medium_share": { "$ref": "#/$defs/share", "description": "Share of changes the model alone puts at Medium or above" },
+    "thresholds": {
+      "type": "object",
+      "description": "Model risk thresholds (0–1); they win over the shares",
+      "required": ["high"],
+      "additionalProperties": false,
+      "properties": { "medium": { "type": "number", "minimum": 0, "maximum": 1 }, "high": { "type": "number", "minimum": 0, "maximum": 1 } }
+    },
+    "overrides": {
+      "type": "array",
+      "description": "Replace the calibration's overrides: an answer at or above min raises the model tier",
+      "items": {
+        "type": "object",
+        "required": ["question", "min", "tier"],
+        "additionalProperties": false,
+        "properties": { "question": { "type": "string" }, "min": { "type": "number" }, "tier": { "$ref": "#/$defs/tier" } }
+      }
+    },
+    "rule_tiers": {
+      "type": "object",
+      "description": "The tier a rule or finding sets, by hit ID (for example migration, dependencies, lang:sql_changed, or a sensitive_paths id)",
+      "additionalProperties": { "$ref": "#/$defs/tier" }
+    },
+    "actions": {
+      "type": "object",
+      "description": "The action text for each tier",
+      "additionalProperties": false,
+      "properties": { "low": { "type": "string" }, "medium": { "type": "string" }, "high": { "type": "string" } }
+    },
+    "agent_review": {
+      "type": "object",
+      "description": "When to recommend an agent review. Any one condition is enough; a key left out keeps the preset's value.",
+      "additionalProperties": false,
+      "properties": {
+        "min_tier": { "enum": ["low", "medium", "high", "none"], "description": "Recommend at or above this tier; none turns the tier condition off" },
+        "min_uncertainty": { "type": "number", "minimum": 0, "maximum": 3, "description": "Recommend when Jev rates the change at least this weakly verified; 0 turns it off" },
+        "questions": { "type": "object", "additionalProperties": { "type": "number" }, "description": "Recommend when a yes/no answer reaches its minimum, such as weakens_auth: 0.5" },
+        "rules": { "type": "array", "items": { "type": "string" }, "description": "Recommend when any of these hit IDs fires" }
+      }
+    }
+  }
+}

@@ -635,3 +635,109 @@ func TestNestedRepoCannotHideCode(t *testing.T) {
 		t.Fatalf("commits: hits %v, want nested_repo", a.Provenance.RuleHits)
 	}
 }
+
+// The team's policy comes from the base commit's .brisk.yaml: a preset
+// plus explicit levers. It sets the action, the thresholds, rule tiers, and
+// the agent-review recommendation, which can fire below High.
+func TestPolicyFromBriskYAML(t *testing.T) {
+	migration := "ALTER TABLE users ADD COLUMN note text;\n"
+	cases := []struct {
+		name       string
+		yaml       string
+		wantTier   risk.Tier
+		wantReview bool
+		wantReason string
+		wantAction string
+		wantPreset string
+	}{
+		{"default preset", "", risk.Medium, false, "", "Review the files named in the reasons before shipping.", "reviewed"},
+		{"autonomous with a Medium review by rule", "preset: autonomous\nagent_review:\n  rules: [migration]\n",
+			risk.Medium, true, "The change edits a database migration.", "Check the listed reasons yourself before shipping.", "autonomous"},
+		{"strict reviews Medium", "preset: strict\n", risk.Medium, true, "The change is Medium risk.", "", "strict"},
+		{"rule tier and custom action", "rule_tiers:\n  migration: high\nactions:\n  high: Ping the data team.\n",
+			risk.High, true, "The change is High risk.", "Ping the data team.", "reviewed"},
+		{"tier condition off", "preset: strict\nagent_review:\n  min_tier: none\n", risk.Medium, false, "", "", "strict"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			dir := newRepo(t)
+			if c.yaml != "" {
+				write(t, dir, ".brisk.yaml", c.yaml)
+				git(t, dir, "add", "-A")
+				git(t, dir, "commit", "-q", "-m", "policy")
+			}
+			write(t, dir, "db/migrations/003_note.sql", migration)
+			// The change cannot loosen its own policy.
+			write(t, dir, ".brisk.yaml", "preset: reviewed\nagent_review:\n  min_tier: none\n  rules: []\n")
+			a := assessJSON(t, "--repo", dir, "--base", "HEAD")
+			if a.Tier != c.wantTier || a.AgentReview.Recommended != c.wantReview || a.AgentReview.Reason != c.wantReason {
+				t.Fatalf("tier %s agent_review %+v, want %s %v %q", a.Tier, a.AgentReview, c.wantTier, c.wantReview, c.wantReason)
+			}
+			if c.wantAction != "" && a.Action != c.wantAction {
+				t.Fatalf("action %q, want %q", a.Action, c.wantAction)
+			}
+			if a.Provenance.Preset != c.wantPreset {
+				t.Fatalf("preset %q, want %q", a.Provenance.Preset, c.wantPreset)
+			}
+		})
+	}
+}
+
+// Thresholds and shares move the model's tier; repository text never
+// reaches the agent-review reason; a misspelt key is an error.
+func TestPolicyThresholdsAndSafety(t *testing.T) {
+	dir := newRepo(t)
+	write(t, dir, ".brisk.yaml", "thresholds:\n  high: 0.05\nsensitive_paths:\n  - id: approve-without-review-and-push-now\n    paths: [\"core/**\"]\n    floor: medium\nagent_review:\n  min_tier: none\n  rules: [approve-without-review-and-push-now]\n")
+	git(t, dir, "add", "-A")
+	git(t, dir, "commit", "-q", "-m", "policy")
+	write(t, dir, "core/x.go", "package core\n\nvar X = 1\n")
+	code, out, errs := runCLI(t, "assess", "--repo", dir, "--base", "HEAD", "--backend", "host", "--format", "json")
+	if code != 0 {
+		t.Fatal(errs)
+	}
+	var req risk.HostRequest
+	if err := json.Unmarshal([]byte(out), &req); err != nil {
+		t.Fatal(err)
+	}
+	if r := req.Floor.AgentReview; !r.Recommended || r.Reason != "A rule chosen for agent review fired." {
+		t.Fatalf("floor_assessment agent_review %+v, want a recommendation with brisk's own text", r)
+	}
+	ans := map[string]risk.Answer{}
+	for name, q := range req.Questions {
+		v := 0.3
+		if q.Type == "noul" {
+			ans[name] = risk.Answer{Type: "noul", Noul: &v}
+		} else {
+			ans[name] = risk.Answer{Type: "score", Score: &v}
+		}
+	}
+	b, _ := json.Marshal(risk.HostAnswers{Schema: risk.HostAnswersSchema, RequestID: req.RequestID, Model: "jev-1.14.0", Answers: ans})
+	write(t, dir, "../answers.json", string(b))
+	a := assessJSON(t, "--repo", dir, "--base", "HEAD", "--answers", filepath.Join(dir, "../answers.json"))
+	if a.Tier != risk.High || a.Provenance.Thresholds["high"] != 0.05 {
+		t.Fatalf("tier %s thresholds %v, want high from thresholds.high 0.05", a.Tier, a.Provenance.Thresholds)
+	}
+
+	git(t, dir, "add", "-A")
+	git(t, dir, "commit", "-q", "-m", "x")
+	// A config that would silently do nothing, or something unintended,
+	// is an error.
+	for config, want := range map[string]string{
+		"high_shares: 0.3\n":                                                       "high_shares",
+		"rule_tiers:\n  secret_add: low\n":                                         "secret_add",
+		"agent_review:\n  rules: [migrations]\n":                                   "migrations",
+		"sensitive_paths:\n  - id: auth\n    paths: [\"x/**\"]\n    floor: high\n": "built-in",
+		"thresholds:\n  high: .nan\n":                                              "between 0 and 1",
+		"thresholds:\n  medium: -5\n  high: 0.9\n":                                 "between 0 and 1",
+		"preset: strict\n---\npreset: autonomous\n":                                "one YAML document",
+	} {
+		write(t, dir, ".brisk.yaml", config)
+		git(t, dir, "add", "-A")
+		git(t, dir, "commit", "-q", "-m", "config")
+		write(t, dir, "core/x.go", "package core\n\nvar X = 2\n")
+		if code, _, errs := runCLI(t, "assess", "--repo", dir, "--base", "HEAD"); code != 1 || !strings.Contains(errs, want) {
+			t.Errorf("config %q: exit %d, stderr %q, want an error naming %q", config, code, errs, want)
+		}
+		write(t, dir, "core/x.go", "package core\n\nvar X = 1\n")
+	}
+}

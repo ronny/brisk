@@ -231,6 +231,9 @@ func writeText(w io.Writer, a risk.Assessment) {
 		fmt.Fprintln(w)
 	}
 	fmt.Fprintf(w, "Action: %s\n", a.Action)
+	if a.AgentReview.Recommended {
+		fmt.Fprintf(w, "Agent review: recommended. %s\n", a.AgentReview.Reason)
+	}
 	src := a.Provenance.Backend
 	if a.Provenance.Model != "" {
 		src += ", " + a.Provenance.Model

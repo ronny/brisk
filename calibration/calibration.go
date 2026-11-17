@@ -8,6 +8,7 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
+	"math"
 	"path"
 	"regexp"
 	"strings"
@@ -31,8 +32,12 @@ type Table struct {
 	// small diff the weighted risk would leave Low. They are set by hand,
 	// not fitted: outcome labels are too sparse for these rare cases.
 	Overrides []Override `json:"overrides,omitempty"`
-	FittedOn  string     `json:"fitted_on,omitempty"`
-	Notes     string     `json:"notes,omitempty"`
+	// RiskQuantiles[i] is the model risk at the i-th percentile of the
+	// changes the table was fitted on (101 values, 0 to 100), so a policy
+	// can ask for a share of changes rather than a raw threshold.
+	RiskQuantiles []float64 `json:"risk_quantiles,omitempty"`
+	FittedOn      string    `json:"fitted_on,omitempty"`
+	Notes         string    `json:"notes,omitempty"`
 }
 
 // Thresholds are the model risks at which the model alone supports Medium
@@ -102,6 +107,19 @@ func For(model string) (*Table, bool, error) {
 		return nil, false, fmt.Errorf("no calibration for %q and no default", model)
 	}
 	return def, false, nil
+}
+
+// ThresholdForShare returns the model risk above which about share (0–1)
+// of the fitted changes fall, and false when the table has no quantiles.
+func (t *Table) ThresholdForShare(share float64) (float64, bool) {
+	if len(t.RiskQuantiles) != 101 {
+		return 0, false
+	}
+	i := int(math.Round(100 * (1 - math.Max(0, math.Min(1, share)))))
+	if i >= 100 {
+		return math.Inf(1), true // no change
+	}
+	return t.RiskQuantiles[i], true
 }
 
 // ByID returns the embedded table with this ID.

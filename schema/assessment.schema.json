@@ -4,7 +4,7 @@
   "title": "brisk assessment",
   "description": "Printed by `brisk assess --format json`.",
   "type": "object",
-  "required": ["schema", "tier", "floor", "impact", "uncertainty", "action", "reasons", "stats", "provenance"],
+  "required": ["schema", "tier", "floor", "impact", "uncertainty", "action", "agent_review", "reasons", "stats", "provenance"],
   "$defs": {
     "tier": { "enum": ["low", "medium", "high"] }
   },
@@ -14,7 +14,16 @@
     "floor": { "$ref": "#/$defs/tier", "description": "Minimum tier set by rules; tier is never below it" },
     "impact": { "type": "number", "minimum": 0, "maximum": 3, "description": "How costly a mistake would be" },
     "uncertainty": { "type": "number", "minimum": 0, "maximum": 3, "description": "How weakly the change was verified" },
-    "action": { "type": "string", "description": "What the user should do, one sentence" },
+    "action": { "type": "string", "description": "What the user should do, one sentence, from the policy preset or .brisk.yaml actions" },
+    "agent_review": {
+      "type": "object",
+      "description": "Whether brisk recommends that a reviewing agent check the change before it ships. Separate from the tier: a Medium change can recommend one. Decided by the policy from the tier, rule hits, and Jev's answers.",
+      "required": ["recommended", "reason"],
+      "properties": {
+        "recommended": { "type": "boolean" },
+        "reason": { "type": "string", "description": "One sentence of brisk's fixed text plus numbers; never an ID or text from the repository or its config. Empty when not recommended." }
+      }
+    },
     "reasons": {
       "type": "array",
       "maxItems": 3,
@@ -59,6 +68,9 @@
         "backend": { "enum": ["openrouter", "host", "rules-only"] },
         "model": { "type": "string" },
         "calibration": { "type": "string" },
+        "preset": { "enum": ["autonomous", "reviewed", "strict"], "description": "Policy preset from the base commit's .brisk.yaml; reviewed when it names none" },
+        "thresholds": { "type": "object", "description": "Model risk thresholds the policy used", "properties": { "medium": { "type": "number" }, "high": { "type": "number" } } },
+        "policy_note": { "type": "string", "description": "Why the policy could not be applied in full, such as a share with no risk quantiles for this model; the tier then uses the calibration's thresholds. The model still answered." },
         "degraded": { "type": "string", "description": "Set when a model backend failed and brisk fell back to rules only" },
         "base": { "type": "string" },
         "head": { "type": "string" },

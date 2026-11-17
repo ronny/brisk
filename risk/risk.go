@@ -159,15 +159,25 @@ const AssessmentSchema = "brisk.assessment/v1"
 
 // Assessment is brisk's output.
 type Assessment struct {
-	Schema      string     `json:"schema"`
-	Tier        Tier       `json:"tier"`
-	Floor       Tier       `json:"floor"`       // minimum tier set by rules
-	Impact      float64    `json:"impact"`      // 0–3
-	Uncertainty float64    `json:"uncertainty"` // 0–3
-	Action      string     `json:"action"`
-	Reasons     []Reason   `json:"reasons"` // at most 3, strongest first
-	Stats       Stats      `json:"stats"`
-	Provenance  Provenance `json:"provenance"`
+	Schema      string      `json:"schema"`
+	Tier        Tier        `json:"tier"`
+	Floor       Tier        `json:"floor"`       // minimum tier set by rules
+	Impact      float64     `json:"impact"`      // 0–3
+	Uncertainty float64     `json:"uncertainty"` // 0–3
+	Action      string      `json:"action"`
+	AgentReview AgentReview `json:"agent_review"`
+	Reasons     []Reason    `json:"reasons"` // at most 3, strongest first
+	Stats       Stats       `json:"stats"`
+	Provenance  Provenance  `json:"provenance"`
+}
+
+// AgentReview says whether brisk recommends that a reviewing agent check
+// the change before it ships, separately from the tier: a Medium change
+// can recommend one. Reason is one sentence written by brisk, never text
+// from the repository.
+type AgentReview struct {
+	Recommended bool   `json:"recommended"`
+	Reason      string `json:"reason"`
 }
 
 // Stats summarises the size of the change.
@@ -200,6 +210,9 @@ type Provenance struct {
 	Backend      string             `json:"backend"`               // "openrouter", "host", "rules-only"
 	Model        string             `json:"model,omitempty"`       // exact version that answered
 	Calibration  string             `json:"calibration,omitempty"` // calibration table used
+	Preset       string             `json:"preset,omitempty"`      // policy preset from .brisk.yaml
+	Thresholds   map[string]float64 `json:"thresholds,omitempty"`  // model risk thresholds the policy used
+	PolicyNote   string             `json:"policy_note,omitempty"` // why the policy could not be applied in full
 	Degraded     string             `json:"degraded,omitempty"`    // why a backend fell back to rules only
 	Base         string             `json:"base"`
 	Head         string             `json:"head,omitempty"`
@@ -368,8 +381,56 @@ type ContextQuery struct {
 type ProjectContext struct {
 	// SensitivePaths are project-specific rules, such as from .brisk.yaml.
 	SensitivePaths []PathRule `json:"sensitive_paths,omitempty"`
+	// Policy is the project's risk policy from .brisk.yaml.
+	Policy PolicyConfig `json:"policy,omitempty"`
 	// Files holds history per changed path.
 	Files map[string]FileHistory `json:"files,omitempty"`
+}
+
+// PolicyConfig is a team's risk policy from .brisk.yaml. Every field is
+// optional: a preset (default "reviewed") fills the rest. Tiers are
+// written "low", "medium", "high".
+type PolicyConfig struct {
+	Preset string `json:"preset,omitempty" yaml:"preset"`
+	// HighShare and MediumShare set the model thresholds as the share of
+	// changes (0–1) the model alone puts at High, or at Medium or above,
+	// using the calibration's risk quantiles.
+	HighShare   *float64 `json:"high_share,omitempty" yaml:"high_share"`
+	MediumShare *float64 `json:"medium_share,omitempty" yaml:"medium_share"`
+	// Thresholds sets model risk thresholds (0–1) directly; they win over
+	// the shares.
+	Thresholds map[string]float64 `json:"thresholds,omitempty" yaml:"thresholds"`
+	// Overrides replace the calibration's: an answer at or above Min
+	// raises the model tier to Tier.
+	Overrides []OverrideConfig `json:"overrides,omitempty" yaml:"overrides"`
+	// RuleTiers changes the tier a rule or finding sets, by hit ID, such
+	// as migration: high or dependencies: low.
+	RuleTiers map[string]string `json:"rule_tiers,omitempty" yaml:"rule_tiers"`
+	// Actions is the text shown for each tier.
+	Actions     map[string]string  `json:"actions,omitempty" yaml:"actions"`
+	AgentReview *AgentReviewConfig `json:"agent_review,omitempty" yaml:"agent_review"`
+}
+
+// OverrideConfig raises the model tier when one answer is strong enough.
+type OverrideConfig struct {
+	Question string  `json:"question" yaml:"question"`
+	Min      float64 `json:"min" yaml:"min"`
+	Tier     string  `json:"tier" yaml:"tier"`
+}
+
+// AgentReviewConfig says when brisk recommends an agent review. Any one
+// condition is enough; a field left out keeps the preset's value.
+type AgentReviewConfig struct {
+	// MinTier recommends a review at or above this tier; "none" turns
+	// the tier condition off.
+	MinTier *string `json:"min_tier,omitempty" yaml:"min_tier"`
+	// MinUncertainty recommends one when Jev rates the change at least
+	// this weakly verified (0–3); 0 turns it off.
+	MinUncertainty *float64 `json:"min_uncertainty,omitempty" yaml:"min_uncertainty"`
+	// Questions recommends one when a yes/no answer reaches its minimum.
+	Questions map[string]float64 `json:"questions,omitempty" yaml:"questions"`
+	// Rules recommends one when any of these hits fires.
+	Rules []string `json:"rules,omitempty" yaml:"rules"`
 }
 
 // PathRule marks paths that need at least a given tier.

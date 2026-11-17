@@ -611,6 +611,23 @@ func protoRenumbered(fc risk.FileChange) []risk.Evidence {
 
 // FindingTier is the floor each kind of structural finding sets. Kinds that
 // are not listed are evidence for the model only.
+// KnownIDs returns every hit ID brisk's own rules and findings can set,
+// apart from config:<id> for a project's sensitive paths.
+func KnownIDs() map[string]bool {
+	ids := map[string]bool{"proto_renumbered": true, "session:verification_failed": true, "gitignore_hides_code": true,
+		"nested_repo": true, "generated_without_source": true, "generated_hand_edited": true}
+	for _, r := range builtinPathRules {
+		ids[r.id] = true
+	}
+	for _, r := range builtinLineRules {
+		ids[r.id] = true
+	}
+	for k := range FindingTier {
+		ids["lang:"+string(k)] = true
+	}
+	return ids
+}
+
 var FindingTier = map[risk.FindingKind]risk.Tier{
 	risk.AuthLogicChanged:         risk.High,
 	risk.ExportedSymbolRemoved:    risk.Medium,
