@@ -7,7 +7,7 @@
   "required": ["schema", "request_id", "model", "state", "questions", "floor_assessment"],
   "properties": {
     "schema": { "const": "brisk.host-request/v1" },
-    "request_id": { "type": "string", "description": "Hash of state and questions; copy it into the answers" },
+    "request_id": { "type": "string", "description": "Hash of state, questions, base commit, and the whole diff; copy it into the answers" },
     "model": { "type": "string", "description": "Decision model the calibration expects, e.g. \"typesafe/jev\"" },
     "state": { "description": "String or JSON object, at most 50,000 characters when serialised" },
     "questions": {

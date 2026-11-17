@@ -150,9 +150,13 @@ func assessCmd(ctx context.Context, args []string, stdout, stderr io.Writer) (in
 	}
 
 	if hostRequest && p.Request != nil {
+		id, err := host.RequestID(*p.Request, p.Changes)
+		if err != nil {
+			return 0, err
+		}
 		req := risk.HostRequest{
 			Schema:    risk.HostRequestSchema,
-			RequestID: p.RequestID,
+			RequestID: id,
 			Model:     "typesafe/jev",
 			State:     p.Request.State,
 			Questions: p.Request.Questions,
@@ -162,10 +166,11 @@ func assessCmd(ctx context.Context, args []string, stdout, stderr io.Writer) (in
 	}
 
 	var a risk.Assessment
-	if _, ok := backend.(*host.Answers); ok {
+	if h, ok := backend.(*host.Answers); ok {
 		if p.Request == nil {
 			return 0, fmt.Errorf("--answers given, but there is nothing to ask: the change is empty")
 		}
+		h.Change = p.Changes
 		resp, err := backend.Answer(ctx, *p.Request)
 		if err != nil {
 			return 0, err

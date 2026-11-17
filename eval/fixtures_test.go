@@ -146,7 +146,7 @@ type fileBackend map[string][]eval.Run
 func (fileBackend) Name() string { return "file" }
 
 func (f fileBackend) Answer(_ context.Context, req risk.Request) (risk.Response, error) {
-	id, err := host.RequestID(req)
+	id, err := host.Key(req)
 	if err != nil {
 		return risk.Response{}, err
 	}

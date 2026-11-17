@@ -326,3 +326,54 @@ func TestSecretsAreRedactedFromModelState(t *testing.T) {
 		t.Errorf("state should keep the code around a redacted secret:\n%s", state)
 	}
 }
+
+// The model state clips long lines, so two changes can give the same state.
+// Answers for one must still be refused for the other.
+func TestAnswersAreBoundToTheWholeChange(t *testing.T) {
+	dir := newRepo(t)
+	prefix := "query = " + strings.Repeat(" ", 400)
+	write(t, dir, "worker.py", prefix+"\"SELECT 1\"\n")
+	git(t, dir, "add", "-A")
+	git(t, dir, "commit", "-q", "-m", "worker")
+
+	hostRequest := func() risk.HostRequest {
+		code, out, errs := runCLI(t, "assess", "--repo", dir, "--base", "HEAD", "--backend", "host", "--format", "json")
+		if code != 0 {
+			t.Fatalf("exit %d: %s", code, errs)
+		}
+		var req risk.HostRequest
+		if err := json.Unmarshal([]byte(out), &req); err != nil {
+			t.Fatal(err)
+		}
+		return req
+	}
+	write(t, dir, "worker.py", prefix+"\"SELECT 2\"\n")
+	first := hostRequest()
+	write(t, dir, "worker.py", prefix+"\"SELECT secret FROM users\"\n")
+	second := hostRequest()
+	s1, _ := json.Marshal(first.State)
+	s2, _ := json.Marshal(second.State)
+	if string(s1) != string(s2) {
+		t.Fatal("test setup: the two states differ, so this does not test clipping")
+	}
+	if first.RequestID == second.RequestID {
+		t.Fatal("changes that clip to the same state got the same request ID")
+	}
+
+	ans := map[string]risk.Answer{}
+	for name, q := range first.Questions {
+		z := 0.0
+		if q.Type == "noul" {
+			ans[name] = risk.Answer{Type: "noul", Noul: &z}
+		} else {
+			ans[name] = risk.Answer{Type: "score", Score: &z}
+		}
+	}
+	b, _ := json.Marshal(risk.HostAnswers{Schema: risk.HostAnswersSchema, RequestID: first.RequestID, Model: "jev-1.14.0", Answers: ans})
+	path := filepath.Join(t.TempDir(), "answers.json")
+	write(t, filepath.Dir(path), "answers.json", string(b))
+	code, _, errs := runCLI(t, "assess", "--repo", dir, "--base", "HEAD", "--answers", path)
+	if code != 1 || !strings.Contains(errs, "answers are for request") {
+		t.Fatalf("stale answers for a clipped change: exit %d, stderr %q", code, errs)
+	}
+}

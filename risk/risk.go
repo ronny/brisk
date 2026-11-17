@@ -270,7 +270,7 @@ const (
 // Questions about State with its own decision model and writes HostAnswers.
 type HostRequest struct {
 	Schema    string              `json:"schema"`
-	RequestID string              `json:"request_id"` // hash of state and questions
+	RequestID string              `json:"request_id"` // hash of state, questions, base commit, and whole diff
 	Model     string              `json:"model"`      // model the calibration expects, e.g. "typesafe/jev"
 	State     any                 `json:"state"`
 	Questions map[string]Question `json:"questions"`

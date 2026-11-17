@@ -47,7 +47,7 @@ type Prepared struct {
 	Hits      []rules.Hit
 	Floor     risk.Tier
 	Request   *risk.Request // nil when there is nothing to ask
-	RequestID string
+	RequestID string        // host.Key(Request): recorded answers are keyed by it
 	Timings   map[string]float64
 	started   time.Time
 }
@@ -91,7 +91,7 @@ func (e *Engine) Prepare(ctx context.Context, in Input) (*Prepared, error) {
 			State:     buildState(cs, p.Findings, p.Hits, p.Context, in.Session, in.Task),
 			Questions: Questions,
 		}
-		id, err := host.RequestID(req)
+		id, err := host.Key(req)
 		if err != nil {
 			return nil, err
 		}

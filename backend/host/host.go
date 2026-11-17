@@ -16,9 +16,10 @@ import (
 	"github.com/ronny/brisk/risk"
 )
 
-// RequestID hashes a request. encoding/json sorts map keys, so the same
-// state and questions always give the same ID.
-func RequestID(req risk.Request) (string, error) {
+// Key hashes what is sent to the model. encoding/json sorts map keys, so
+// the same state and questions always give the same key; recorded answers
+// are keyed by it.
+func Key(req risk.Request) (string, error) {
 	b, err := json.Marshal(req)
 	if err != nil {
 		return "", err
@@ -27,9 +28,23 @@ func RequestID(req risk.Request) (string, error) {
 	return "sha256:" + hex.EncodeToString(sum[:]), nil
 }
 
+// RequestID is the host protocol's ID for a request about cs. The state
+// is clipped to fit the model, so two changes can give the same state; the
+// ID also covers the base commit and the hash of the whole diff, so answers
+// written for one change are refused for any other.
+func RequestID(req risk.Request, cs *risk.ChangeSet) (string, error) {
+	key, err := Key(req)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256([]byte(key + "\n" + cs.Base + "\n" + cs.DiffHash))
+	return "sha256:" + hex.EncodeToString(sum[:]), nil
+}
+
 // Answers is a backend that returns answers a harness already wrote.
 type Answers struct {
-	File risk.HostAnswers
+	File   risk.HostAnswers
+	Change *risk.ChangeSet // the change being assessed now
 }
 
 var _ risk.Backend = (*Answers)(nil)
@@ -54,12 +69,15 @@ func (a *Answers) Name() string { return "host" }
 
 // Answer returns the stored answers if they were written for req.
 func (a *Answers) Answer(_ context.Context, req risk.Request) (risk.Response, error) {
-	id, err := RequestID(req)
+	if a.Change == nil {
+		return risk.Response{}, fmt.Errorf("host answers: no change to check them against")
+	}
+	id, err := RequestID(req, a.Change)
 	if err != nil {
 		return risk.Response{}, err
 	}
 	if id != a.File.RequestID {
-		return risk.Response{}, fmt.Errorf("answers are for request %s, but this change gives %s; the diff or flags changed since the request was printed", a.File.RequestID, id)
+		return risk.Response{}, fmt.Errorf("answers are for request %s, but this change gives %s; the change or flags changed since the request was printed", a.File.RequestID, id)
 	}
 	for name := range req.Questions {
 		if _, ok := a.File.Answers[name]; !ok {
