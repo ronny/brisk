@@ -59,6 +59,10 @@
         }
       }
     },
+    "business_rules": {
+      "type": "string",
+      "description": "Path inside the repository of a Markdown file of the project's business rules, such as .brisk/business-rules.md, read from the same base commit. Its first 4,000 characters go into the model state as labelled project context, and agent_review.context_files names it for the reviewer. It never sets a tier by itself: add questions or content_rules for that. Its text never appears in reasons."
+    },
     "review_checks": {
       "type": "object",
       "description": "A team's own review area for a project rule (sensitive_paths, content_rules) or question, keyed by its id. Used in agent_review.plan with source config in place of brisk's generic project-rule area.",

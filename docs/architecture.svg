@@ -59,7 +59,7 @@
 <rect x="435" y="555" width="330" height="120" rx="8" fill="white" stroke="#aab5c5" stroke-width="1"/>
 <text x="453" y="584" font-size="16" fill="#17243b" font-weight="600" text-anchor="start">Project context + policy</text>
 <text x="453" y="612" font-size="13" fill="#526078" font-weight="400" text-anchor="start">Git history; path + content rules</text>
-<text x="453" y="634" font-size="13" fill="#526078" font-weight="400" text-anchor="start">Base config: policy + project questions</text>
+<text x="453" y="634" font-size="13" fill="#526078" font-weight="400" text-anchor="start">Base config: policy, questions, rules file</text>
 <text x="453" y="656" font-size="13" fill="#526078" font-weight="400" text-anchor="start">Presets: autonomous / reviewed / strict</text>
 <rect x="830" y="555" width="330" height="120" rx="8" fill="white" stroke="#aab5c5" stroke-width="1"/>
 <text x="848" y="584" font-size="16" fill="#17243b" font-weight="600" text-anchor="start">Classifier backends</text>

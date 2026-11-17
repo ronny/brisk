@@ -104,6 +104,16 @@ func (e *Engine) Prepare(ctx context.Context, in Input) (*Prepared, error) {
 		return nil, fmt.Errorf(".brisk.yaml: %w", err)
 	}
 	p.Hits = rules.Apply(cs, p.Findings, in.Session, rules.Config{PathRules: p.Context.SensitivePaths, ContentRules: p.Context.ContentRules})
+	// Editing the business-rules file is a change to brisk's own rules,
+	// wherever the team keeps it.
+	if br := p.Context.BusinessRules; br != nil && !slices.ContainsFunc(p.Hits, func(h rules.Hit) bool { return h.ID == "brisk_config" }) {
+		for _, f := range cs.Files {
+			if f.Path == br.Path || f.OldPath == br.Path {
+				p.Hits = append(p.Hits, rules.Hit{ID: "brisk_config", Tier: risk.Medium, Text: "Changes brisk's own risk rules", Source: "rule", Evidence: []risk.Evidence{{Path: f.Path}}})
+				break
+			}
+		}
+	}
 	for i, h := range p.Hits {
 		// A project rule hits as config:<id>; its id may be written either way.
 		if t, ok := p.Policy.RuleTiers[h.ID]; ok {
@@ -471,6 +481,9 @@ func (p *Prepared) Finish(backend string, resp *risk.Response, degraded string) 
 		review = p.ReviewAnswers
 	}
 	a.AgentReview.Plan, a.Provenance.ReviewPlan = p.buildPlan(firedIDs, firedTier, a.Provenance.Answers, review)
+	if br := p.Context.BusinessRules; br != nil {
+		a.AgentReview.ContextFiles = []string{br.Path}
+	}
 	if rp := a.Provenance.ReviewPlan; rp != nil && !rp.Tailored {
 		switch {
 		case resp == nil:

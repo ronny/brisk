@@ -86,6 +86,27 @@ A content rule matches one line at a time, so it is a tripwire, not a guarantee:
 
 Test a project rule with a fixture in `testdata/fixtures/` (a base `.brisk.yaml`, base and head files, and the expected tier), or with a throwaway commit and `brisk assess --base HEAD`.
 
+### Business rules
+
+Write the project's business rules in plain prose in a Markdown file and name it in `.brisk.yaml`:
+
+```yaml
+business_rules: .brisk/business-rules.md
+questions:
+  - id: breaks_business_rule
+    text: Does this change break or alter a project business rule listed in the state?
+    raise_to: medium
+```
+
+- **Where it comes from:** like `.brisk.yaml`, the file is read from the base commit, so a change cannot rewrite the rules it is judged against. Editing `.brisk/**` hits the `brisk_config` rule (Medium).
+- **What Jev sees:** the first 4,000 characters (cut at a line end) go into the model state as `project_business_rules`, labelled as the team's rules and not as instructions, with secrets redacted. The rest of the state budget stays with the change.
+- **What sets the tier:** only `questions` and `content_rules`. The file itself never raises or lowers anything; pair it with a catch-all question like the one above, or one question per rule that matters.
+- **What the reviewer gets:** `agent_review.context_files` names the file, so a reviewing agent reads it itself. Its text never appears in `reasons` or `agent_review.reason`.
+- **Errors:** the path must name a regular file in the base commit. A missing file, a directory or a symlink stops every assessment until the base branch is fixed, as a bad `.brisk.yaml` does.
+- **Cost:** for a repo that names a file, every request key changes when the file changes, so recorded answers have to be refreshed.
+
+On nine labelled fixtures (`testdata/fixtures/business-rule-*.txt`), the catch-all question answered 0.92–0.99 on all five changes that broke a written rule and 0.03–0.05 on the four that did not, over three runs. Without the file brisk rated three of the five rule breaks Low; with it, all five were Medium and no safe change was raised. The fixtures are small and the breaks are plain, so `raise_to: medium` is the default we recommend; move to `high` once the question holds up on your own history.
+
 ### Review plan
 
 `agent_review.plan` tells a reviewing agent where to look and what to check, most important first. It is built whether or not a review is recommended. Each area comes from a rule hit, a model override that fired, or an answer that met an `agent_review` condition, so a review recommended by an answer alone still has an area:

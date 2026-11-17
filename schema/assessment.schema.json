@@ -22,6 +22,11 @@
       "properties": {
         "recommended": { "type": "boolean" },
         "reason": { "type": "string", "description": "One sentence of brisk's fixed text plus numbers; never an ID or text from the repository or its config. Empty when not recommended." },
+        "context_files": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Repository paths a reviewer should read for the project's rules, such as the business_rules file. Paths only; the file's text is not copied here."
+        },
         "plan": {
           "type": "array",
           "description": "Where a reviewer should look and what to check, most important first; built whether or not a review is recommended, and may be empty. Area and check text come from brisk's catalog (source brisk) or the base .brisk.yaml review_checks (source config); the model only scores areas. Evidence paths and symbols are repository text.",

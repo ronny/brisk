@@ -290,7 +290,7 @@ var builtinPathRules = []pathRule{
 	},
 	{
 		id: "brisk_config", tier: risk.Medium, text: "Changes brisk's own risk rules",
-		match: globs(".brisk.yaml"),
+		match: globs(".brisk.yaml", ".brisk/**"),
 	},
 	{
 		id: "public_api", tier: risk.Medium, text: "Changes a public API definition",

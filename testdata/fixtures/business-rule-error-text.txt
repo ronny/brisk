@@ -1,0 +1,142 @@
+-- message --
+loyalty: clearer error message
+-- expect --
+low
+-- note --
+Business-rules fixture: the base has .brisk/business-rules.md and a catch-all question with raise_to: medium.
+-- base/.brisk.yaml --
+business_rules: .brisk/business-rules.md
+questions:
+  - id: breaks_business_rule
+    text: Does this change break or alter a project business rule listed in the state?
+    raise_to: medium
+-- base/.brisk/business-rules.md --
+# Loyalty business rules
+
+- Points are earned at 1 point per whole dollar spent. Partial dollars never earn a point, so amounts are always rounded down.
+- Staff accounts never earn points.
+- A customer's points balance never goes negative: a redemption larger than the balance must fail.
+- 100 points are worth one dollar of discount, and a discount from points never exceeds 50% of the order total.
+- Points expire 12 months after the purchase that earned them, not after the customer's last purchase.
+-- base/internal/loyalty/points.go --
+package loyalty
+
+import (
+	"errors"
+	"math"
+	"time"
+)
+
+// Customer is a loyalty account.
+type Customer struct {
+	ID     string
+	Staff  bool
+	Points int
+	Grants []Grant
+}
+
+// Grant is points earned by one purchase.
+type Grant struct {
+	Points int
+	At     time.Time
+}
+
+// ErrInsufficient is returned when a customer redeems more points than they have.
+var ErrInsufficient = errors.New("loyalty: not enough points")
+
+// Earn adds the points for a purchase of amount dollars.
+func Earn(c *Customer, amount float64, now time.Time) int {
+	if c.Staff {
+		return 0
+	}
+	pts := int(math.Floor(amount))
+	c.Points += pts
+	c.Grants = append(c.Grants, Grant{Points: pts, At: now})
+	return pts
+}
+
+// Redeem spends points on an order and returns the discount in dollars.
+func Redeem(c *Customer, points int, orderTotal float64) (float64, error) {
+	if points > c.Points {
+		return 0, ErrInsufficient
+	}
+	discount := float64(points) / 100
+	if limit := orderTotal * 0.5; discount > limit {
+		discount = limit
+	}
+	c.Points -= points
+	return discount, nil
+}
+
+// Expired reports whether grant g has expired at now.
+func Expired(c *Customer, g Grant, now time.Time) bool {
+	return now.After(g.At.AddDate(1, 0, 0))
+}
+-- base/internal/loyalty/points_test.go --
+package loyalty
+
+import (
+	"testing"
+	"time"
+)
+
+func TestEarnRoundsDown(t *testing.T) {
+	c := &Customer{}
+	if got := Earn(c, 9.99, time.Now()); got != 9 {
+		t.Fatalf("got %d", got)
+	}
+}
+-- head/internal/loyalty/points.go --
+package loyalty
+
+import (
+	"errors"
+	"math"
+	"time"
+)
+
+// Customer is a loyalty account.
+type Customer struct {
+	ID     string
+	Staff  bool
+	Points int
+	Grants []Grant
+}
+
+// Grant is points earned by one purchase.
+type Grant struct {
+	Points int
+	At     time.Time
+}
+
+// ErrInsufficient is returned when a customer redeems more points than they have.
+var ErrInsufficient = errors.New("loyalty: the customer does not have enough points")
+
+// Earn adds the points for a purchase of amount dollars.
+func Earn(c *Customer, amount float64, now time.Time) int {
+	if c.Staff {
+		return 0
+	}
+	pts := int(math.Floor(amount))
+	c.Points += pts
+	c.Grants = append(c.Grants, Grant{Points: pts, At: now})
+	return pts
+}
+
+// Redeem spends points on an order and returns the discount in dollars.
+func Redeem(c *Customer, points int, orderTotal float64) (float64, error) {
+	if points > c.Points {
+		return 0, ErrInsufficient
+	}
+	discount := float64(points) / 100
+	if limit := orderTotal * 0.5; discount > limit {
+		discount = limit
+	}
+	c.Points -= points
+	return discount, nil
+}
+
+// Expired reports whether grant g has expired at now.
+func Expired(c *Customer, g Grant, now time.Time) bool {
+	return now.After(g.At.AddDate(1, 0, 0))
+}

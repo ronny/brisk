@@ -182,6 +182,10 @@ type AgentReview struct {
 	// Plan lists where a reviewer should look and what to check, most
 	// important first. It is built whether or not a review is recommended.
 	Plan []ReviewArea `json:"plan"`
+	// ContextFiles are repository files, from the base .brisk.yaml, that a
+	// reviewer should read for the project's rules, such as the
+	// business_rules file. Paths only; the reviewer reads the file itself.
+	ContextFiles []string `json:"context_files,omitempty"`
 }
 
 // ReviewArea is one part of a review plan. Area and check text come from
@@ -434,6 +438,9 @@ type ProjectContext struct {
 	ContentRules []ContentRule `json:"content_rules,omitempty"`
 	// Policy is the project's risk policy from .brisk.yaml.
 	Policy PolicyConfig `json:"policy,omitempty"`
+	// BusinessRules is the project's business-rules file, from the base
+	// commit, when .brisk.yaml names one.
+	BusinessRules *BusinessRules `json:"business_rules,omitempty"`
 	// Files holds history per changed path.
 	Files map[string]FileHistory `json:"files,omitempty"`
 }
@@ -543,3 +550,16 @@ type FileHistory struct {
 type ContextProvider interface {
 	Context(ctx context.Context, q ContextQuery) (ProjectContext, error)
 }
+
+// BusinessRules is a project's prose business rules, read from the base
+// commit. It is context for the model and the reviewer: it never sets a
+// tier by itself and its text never appears in reasons.
+type BusinessRules struct {
+	Path      string `json:"path"`
+	Text      string `json:"text"`      // capped at MaxBusinessRulesChars
+	Truncated bool   `json:"truncated"` // the file was longer than the cap
+}
+
+// MaxBusinessRulesChars caps the business rules sent to the model; the
+// rest of the state budget is for the change.
+const MaxBusinessRulesChars = 4000

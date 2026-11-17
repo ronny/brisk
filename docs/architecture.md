@@ -74,6 +74,7 @@ Base-commit `.brisk.yaml` controls policy. Its optional keys are:
 - `actions`: action text for each tier.
 - `agent_review`: independent review conditions, with `min_tier`, `min_uncertainty`, `questions`, and `rules`.
 - `review_checks`: the team's own review area and checks for a project rule or question.
+- `business_rules`: a Markdown file of the project's business rules, read from the base commit. Its capped text reaches the model as labelled context, and `agent_review.context_files` names it for the reviewer. It never sets a tier: questions and content rules do.
 
 Path and content rules hit as `config:<id>` and set the floor like built-in rules. A content rule matches one line at a time, so it is a tripwire, not a guarantee.
 Project questions have no calibration weight. Each one acts only through its `raise_to` override, so it can raise the model tier but never lower it. Without `raise_to`, the answer appears only in `provenance.answers`.

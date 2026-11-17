@@ -9,12 +9,14 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/bmatcuk/doublestar/v4"
 	"go.yaml.in/yaml/v3"
@@ -53,14 +55,18 @@ type Config struct {
 		Floor   string   `yaml:"floor"`
 		Reason  string   `yaml:"reason"`
 	} `yaml:"content_rules"`
+	// BusinessRules names a file of prose business rules in the repo, such
+	// as .brisk/business-rules.md, read from the same commit as this file.
+	BusinessRules     string `yaml:"business_rules"`
 	risk.PolicyConfig `yaml:",inline"`
 }
 
 // Rules is what a .brisk.yaml file holds.
 type Rules struct {
-	Paths   []risk.PathRule
-	Content []risk.ContentRule
-	Policy  risk.PolicyConfig
+	Paths         []risk.PathRule
+	Content       []risk.ContentRule
+	Policy        risk.PolicyConfig
+	BusinessRules string // repo-relative path, or ""
 }
 
 // LoadConfig reads a .brisk.yaml file. A missing file is not an error.
@@ -100,6 +106,13 @@ func ParseConfig(p string, b []byte) (Rules, error) {
 		return true
 	}
 	out := Rules{Policy: c.PolicyConfig}
+	if c.BusinessRules != "" {
+		clean := path.Clean(c.BusinessRules)
+		if path.IsAbs(clean) || clean == "." || clean == ".." || strings.HasPrefix(clean, "../") || strings.Contains(c.BusinessRules, "\\") {
+			return fail("business_rules %q: use a path inside the repository, such as .brisk/business-rules.md", c.BusinessRules)
+		}
+		out.BusinessRules = clean
+	}
 	ids := map[string]bool{}
 	for _, r := range c.SensitivePaths {
 		t, err := risk.ParseTier(r.Floor)
@@ -166,6 +179,21 @@ func (p *Provider) Context(ctx context.Context, q risk.ContextQuery) (risk.Proje
 		return pc, err
 	}
 	pc.SensitivePaths, pc.ContentRules, pc.Policy = cfg.Paths, cfg.Content, cfg.Policy
+	if cfg.BusinessRules != "" {
+		// Like the config, the rules come from the base commit, so the
+		// change cannot rewrite the rules it is judged against.
+		r := &gitx.Repo{Root: q.RepoRoot}
+		// Only a regular file: not a directory, symlink or submodule.
+		ls, err := r.Run(ctx, "ls-tree", q.Base, "--", cfg.BusinessRules)
+		if err != nil || !(bytes.HasPrefix(ls, []byte("100644 blob ")) || bytes.HasPrefix(ls, []byte("100755 blob "))) {
+			return pc, fmt.Errorf("business_rules: %s is not a file in the base commit %s", cfg.BusinessRules, q.Base)
+		}
+		b, err := r.Run(ctx, "show", q.Base+":"+cfg.BusinessRules)
+		if err != nil {
+			return pc, fmt.Errorf("business_rules: %s is not in the base commit %s", cfg.BusinessRules, q.Base)
+		}
+		pc.BusinessRules = capRules(cfg.BusinessRules, string(b))
+	}
 
 	owners := loadCodeowners(q.RepoRoot)
 	hist, err := p.historyFor(ctx, q.RepoRoot, q.Base)
@@ -179,6 +207,24 @@ func (p *Provider) Context(ctx context.Context, q risk.ContextQuery) (risk.Proje
 		pc.Files[path] = fh
 	}
 	return pc, nil
+}
+
+// capRules keeps the first MaxBusinessRulesChars of the file, cut at a line
+// end when there is one in the last quarter.
+func capRules(p, text string) *risk.BusinessRules {
+	text = strings.TrimSpace(strings.ToValidUTF8(text, ""))
+	br := &risk.BusinessRules{Path: p, Text: text}
+	if len(text) > risk.MaxBusinessRulesChars {
+		cut := text[:risk.MaxBusinessRulesChars]
+		for !utf8.ValidString(cut) {
+			cut = cut[:len(cut)-1]
+		}
+		if i := strings.LastIndexByte(cut, '\n'); i > len(cut)*3/4 {
+			cut = cut[:i]
+		}
+		br.Text, br.Truncated = cut, true
+	}
+	return br
 }
 
 // ---------------------------------------------------------------------------

@@ -106,7 +106,7 @@ def runtime():
         "Reports structural changes"])
     d.box(435, 555, 330, 120, "Project context + policy", [
         "Git history; path + content rules",
-        "Base config: policy + project questions",
+        "Base config: policy, questions, rules file",
         "Presets: autonomous / reviewed / strict"])
     d.box(830, 555, 330, 120, "Classifier backends", [
         "Jev through OpenRouter",
