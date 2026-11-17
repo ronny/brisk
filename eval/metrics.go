@@ -1,6 +1,7 @@
 package eval
 
 import (
+	"fmt"
 	"math"
 	"math/rand/v2"
 	"sort"
@@ -18,6 +19,8 @@ type Scored struct {
 	Model     string
 	Answered  bool
 	ModelMS   float64
+	// AgentReview is set by ScorePolicy.
+	AgentReview risk.AgentReview
 }
 
 // Score applies a calibration table to the first run of answers for each
@@ -35,6 +38,48 @@ func Score(recs []Record, runs map[string][]Run, t *calibration.Table, run int) 
 			s.Tier = risk.Max(r.Floor, mt)
 		}
 		out = append(out, s)
+	}
+	return out
+}
+
+// ScorePolicy scores like Score with a policy's thresholds and overrides,
+// and records its agent-review recommendation. Policies with rule_tiers
+// are not supported: records keep the floor from when they were prepared.
+func ScorePolicy(recs []Record, runs map[string][]Run, t *calibration.Table, pol assess.Policy) ([]Scored, error) {
+	pt, err := pol.Table(t)
+	if err != nil {
+		return nil, err
+	}
+	if len(pol.RuleTiers) > 0 {
+		return nil, fmt.Errorf("policy %s: rule_tiers need records prepared with that policy", pol.Preset)
+	}
+	ss := Score(recs, runs, pt, 0)
+	for i := range ss {
+		var answers map[string]risk.Answer
+		if rs := runs[ss[i].RequestID]; len(rs) > 0 {
+			answers = rs[0].Answers
+		}
+		ss[i].AgentReview = pol.AgentReview(ss[i].Tier, ss[i].Hits, answers)
+	}
+	return ss, nil
+}
+
+// RiskQuantiles returns the model risk at each percentile, 0 to 100, over
+// the answered records: the calibration's risk_quantiles.
+func RiskQuantiles(recs []Record, runs map[string][]Run, t *calibration.Table) []float64 {
+	var rs []float64
+	for _, s := range Score(recs, runs, t, 0) {
+		if s.Answered {
+			rs = append(rs, s.ModelRisk)
+		}
+	}
+	if len(rs) == 0 {
+		return nil
+	}
+	sort.Float64s(rs)
+	out := make([]float64, 101)
+	for i := range out {
+		out[i] = math.Round(Percentile(rs, float64(i))*1e4) / 1e4
 	}
 	return out
 }

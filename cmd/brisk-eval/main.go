@@ -359,6 +359,17 @@ type Report struct {
 	Latency     map[string]float64        `json:"latency_ms"`
 	Cost        map[string]float64        `json:"cost"`
 	HitRates    map[string]map[string]int `json:"rule_hits"`
+	Presets     map[string]PresetSummary  `json:"presets"`
+}
+
+// PresetSummary is one policy preset on the test set.
+type PresetSummary struct {
+	eval.Summary
+	AgentReviewShare   eval.Proportion `json:"agent_review_share"`
+	AgentReviewRecall  eval.Proportion `json:"agent_review_recall"`
+	BadRateReviewed    eval.Proportion `json:"bad_rate_agent_review"`
+	BadRateNotReviewed eval.Proportion `json:"bad_rate_no_agent_review"`
+	ReviewBelowHigh    int             `json:"agent_review_below_high"`
 }
 
 func score(args []string) error {
@@ -373,6 +384,8 @@ func score(args []string) error {
 	reportPath := fs.String("report", "", "report JSON")
 	latPath := fs.String("latency-answers", "", "answers from sequential calls, for model latency")
 	features := fs.String("features", "", "comma-separated features to fit (ablation); default all")
+	presets := fs.String("presets", "autonomous,reviewed,strict", "comma-separated policy presets to report on the test set")
+	quantilesOut := fs.String("quantiles-out", "", "with -table: write the table here with risk_quantiles from the training split")
 	fs.Parse(args)
 
 	var recs []eval.Record
@@ -447,6 +460,7 @@ func score(args []string) error {
 			ID:        id, Models: uniq(modelIDs), HighBudget: *highBudget, MediumShare: *medShare, Features: splitList(*features),
 			FittedOn: fmt.Sprintf("%d changes: the oldest %.0f%% of %s", len(train), *split*100, strings.Join(repos, ", ")),
 		})
+		table.RiskQuantiles = eval.RiskQuantiles(train, runs, table)
 		table.Notes = "Fitted by brisk-eval score. Features: impact and uncertainty are Jev scores / 3, flags is the largest yes/no answer, history is prior fixes to the changed files."
 		if *fitOut != "" {
 			b, _ := json.MarshalIndent(table, "", "  ")
@@ -454,6 +468,16 @@ func score(args []string) error {
 				return err
 			}
 		}
+	}
+
+	if *quantilesOut != "" {
+		withQ := *table
+		withQ.RiskQuantiles = eval.RiskQuantiles(train, runs, table)
+		b, _ := json.MarshalIndent(&withQ, "", "  ")
+		if err := os.WriteFile(*quantilesOut, append(b, '\n'), 0o644); err != nil {
+			return err
+		}
+		table = &withQ
 	}
 
 	rep := Report{Generated: time.Now().UTC(), Calibration: table, Models: models, Split: *split,
@@ -490,6 +514,44 @@ func score(args []string) error {
 		}
 		rep.Labels[repo] = lc
 		rep.HitRates[repo] = hits
+	}
+	rep.Presets = map[string]PresetSummary{}
+	for _, name := range splitList(*presets) {
+		pol, ok := assess.Presets[name]
+		if !ok {
+			return fmt.Errorf("unknown preset %q", name)
+		}
+		ss, err := eval.ScorePolicy(test, runs, table, pol)
+		if err != nil {
+			return err
+		}
+		ps := PresetSummary{Summary: eval.Summarise(ss)}
+		var rec, recBad, bad, other, otherBad, recMedLow int
+		for _, x := range ss {
+			if x.Bad {
+				bad++
+			}
+			if x.AgentReview.Recommended {
+				rec++
+				if x.Bad {
+					recBad++
+				}
+				if x.Tier < risk.High {
+					recMedLow++
+				}
+			} else {
+				other++
+				if x.Bad {
+					otherBad++
+				}
+			}
+		}
+		ps.AgentReviewShare = eval.NewProportion(rec, len(ss))
+		ps.AgentReviewRecall = eval.NewProportion(recBad, bad)
+		ps.BadRateReviewed = eval.NewProportion(recBad, rec)
+		ps.BadRateNotReviewed = eval.NewProportion(otherBad, other)
+		ps.ReviewBelowHigh = recMedLow
+		rep.Presets[name] = ps
 	}
 	rep.Test["combined"] = eval.Summarise(eval.Score(test, runs, table, 0))
 	rep.All["combined"] = eval.Summarise(eval.Score(allRecs, runs, table, 0))
@@ -579,6 +641,20 @@ func printSummary(rep Report, repos []string) {
 			s.BadRate["low"].Value, s.BadRate["medium"].Value, s.BadRate["high"].Value, s.TierCounts["low"], s.TierCounts["medium"], s.TierCounts["high"], s.Monotonic,
 			s.AP["brisk"], s.AP["rules_only"], s.AP["diff_size"], s.AP["model_only"], s.AP["base_rate"],
 			s.APDiffRules.Value, s.APDiffRules.Low, s.APDiffRules.High, ro.HighRecall.Value, ro.HighFlag.Value)
+	}
+	names := make([]string, 0, len(rep.Presets))
+	for n := range rep.Presets {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	for _, n := range names {
+		p := rep.Presets[n]
+		fmt.Printf("preset %-10s High flag %.2f recall %.2f [%.2f,%.2f] | Medium+ flag %.2f recall %.2f | bad rate L/M/H %.3f/%.3f/%.3f | agent review flag %.2f recall %.2f [%.2f,%.2f], bad rate %.3f vs %.3f without, %d below High\n",
+			n, p.HighFlag.Value, p.HighRecall.Value, p.HighRecall.Low, p.HighRecall.High,
+			float64(p.TierCounts["medium"]+p.TierCounts["high"])/float64(max(1, p.N)), p.MedHighRec.Value,
+			p.BadRate["low"].Value, p.BadRate["medium"].Value, p.BadRate["high"].Value,
+			p.AgentReviewShare.Value, p.AgentReviewRecall.Value, p.AgentReviewRecall.Low, p.AgentReviewRecall.High,
+			p.BadRateReviewed.Value, p.BadRateNotReviewed.Value, p.ReviewBelowHigh)
 	}
 	fmt.Printf("stability %v\nlatency %v\ncost %v\nlabels %v\n", rep.Stability, rep.Latency, rep.Cost, rep.Labels)
 }
