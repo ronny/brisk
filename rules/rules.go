@@ -359,10 +359,23 @@ func Apply(cs *risk.ChangeSet, findings []risk.Finding, session *risk.Session, c
 		}
 	}
 
+	// A new file that claims to be generated is analysed, since the claim
+	// is the change's own, but its findings stop at Medium: generated code
+	// (protobuf getters for page tokens, sqlc queries) trips the auth and
+	// SQL detectors, and the file's diff still goes to the model.
+	claimsGenerated := map[string]bool{}
+	for _, fc := range cs.Files {
+		if fc.Status == risk.Added && (generatedName(fc.Path) || HasGeneratedMarker(fc.New)) {
+			claimsGenerated[fc.Path] = true
+		}
+	}
 	for _, f := range findings {
 		tier, ok := FindingTier[f.Kind]
 		if !ok || f.Kind == risk.ParseError {
 			continue
+		}
+		if claimsGenerated[f.Path] {
+			tier = min(tier, risk.Medium)
 		}
 		add("lang:"+string(f.Kind), tier, findingText[f.Kind], "language",
 			risk.Evidence{Path: f.Path, StartLine: f.StartLine, EndLine: f.EndLine, Symbol: f.Symbol})
