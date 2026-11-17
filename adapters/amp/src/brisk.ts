@@ -33,12 +33,16 @@ export interface Assessment {
 	action: string
 	reasons: Reason[]
 	stats: { files: number; additions: number; deletions: number }
+	/** Whether a further agent review is recommended, separate from the tier. Older binaries omit it. */
+	agent_review?: { recommended: boolean; reason: string }
 	provenance: {
 		brisk_version: string
 		backend: 'openrouter' | 'host' | 'rules-only'
 		model?: string
 		degraded?: string
 		diff_hash: string
+		/** The preset the project's base .brisk.yaml chose, if any. */
+		preset?: string
 		[k: string]: unknown
 	}
 }

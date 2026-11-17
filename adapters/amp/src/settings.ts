@@ -10,12 +10,56 @@ import { homedir, platform } from 'node:os'
 import { delimiter, isAbsolute, join, relative, resolve } from 'node:path'
 import type { Mode } from './brisk.ts'
 
+/**
+ * What the plugin does when brisk recommends an agent review, from least to
+ * most automatic:
+ * - off: nothing.
+ * - suggest: a quick action and a line in the Ship prompt.
+ * - before-ship: also tells the Ship and Push to Branch turn to run the review first.
+ * - after-turn: also starts the review as soon as the agent's turn ends.
+ */
+export const REVIEW_MODES = ['off', 'suggest', 'before-ship', 'after-turn'] as const
+export type ReviewMode = (typeof REVIEW_MODES)[number]
+
+/**
+ * Plugin defaults per preset. The names match brisk's .brisk.yaml presets.
+ * Explicit settings override them.
+ */
+export const PRESETS: Record<string, { agentReview: ReviewMode; confirmShip: boolean }> = {
+	// Nobody reviews the agent's work, so the agent reviews it itself.
+	autonomous: { agentReview: 'after-turn', confirmShip: false },
+	// People review pull requests; brisk points them at the risky parts.
+	reviewed: { agentReview: 'suggest', confirmShip: false },
+	// Review before every risky Ship, and a person confirms High.
+	strict: { agentReview: 'before-ship', confirmShip: true },
+}
+const DEFAULT_PRESET = 'reviewed'
+
 export interface Settings {
 	bin: string
 	mode: Mode
 	base?: string
+	/** The trusted preset in effect. */
+	preset: string
 	/** Ask a person before Ship on High or unassessed changes in this project. */
 	confirmShip: boolean
+	agentReview: ReviewMode
+}
+
+/**
+ * reviewMode is what to do about a recommended agent review. The project's
+ * own preset (from its base .brisk.yaml, reported by brisk) can make this
+ * more automatic than the user's settings, up to before-ship, never less,
+ * and not when the user turned agent review off.
+ */
+export function reviewMode(cfg: Settings, projectPreset?: string): ReviewMode {
+	let project = projectPreset && Object.hasOwn(PRESETS, projectPreset) ? PRESETS[projectPreset].agentReview : undefined
+	// off is the user's explicit opt-out, so the project cannot override it.
+	if (!project || cfg.agentReview === 'off') return cfg.agentReview
+	// Only the user can choose after-turn, so a cloned repository cannot
+	// make the agent start turns on its own.
+	if (project === 'after-turn') project = 'before-ship'
+	return REVIEW_MODES.indexOf(project) > REVIEW_MODES.indexOf(cfg.agentReview) ? project : cfg.agentReview
 }
 
 /** Paths of the trusted settings files, lowest precedence first. */
@@ -113,8 +157,11 @@ export async function resolveBinary(bin: string, root: string, path = process.en
  *
  * - amp.brisk.binary: a bare command name looked up on PATH, or an absolute
  *   (or ~/) path outside the project. Anything else falls back to `brisk`.
- * - amp.brisk.confirmShipOnHigh: true for every project, or a list of project
- *   roots to turn it on for.
+ * - amp.brisk.preset: autonomous, reviewed (default), or strict; sets the
+ *   defaults of the two keys below.
+ * - amp.brisk.confirmShipOnHigh: true for every project, false, or a list of
+ *   project roots to turn it on for.
+ * - amp.brisk.agentReview: one of REVIEW_MODES.
  */
 export function settingsFrom(
 	c: Record<string, unknown>,
@@ -142,10 +189,15 @@ export function settingsFrom(
 						? 'binary'
 						: 'amp'
 
+	const preset = Object.hasOwn(PRESETS, str('preset') ?? '') ? str('preset')! : DEFAULT_PRESET
 	const confirm = c['amp.brisk.confirmShipOnHigh']
 	const confirmShip =
-		confirm === true ||
-		(Array.isArray(confirm) &&
-			confirm.some((p) => typeof p === 'string' && real(p.startsWith('~/') ? join(home, p.slice(2)) : p) === real(root)))
-	return { bin, mode, base: str('base'), confirmShip }
+		confirm === undefined
+			? PRESETS[preset].confirmShip
+			: confirm === true ||
+				(Array.isArray(confirm) &&
+					confirm.some((p) => typeof p === 'string' && real(p.startsWith('~/') ? join(home, p.slice(2)) : p) === real(root)))
+	const review = str('agentReview')
+	const agentReview = (REVIEW_MODES as readonly string[]).includes(review ?? '') ? (review as ReviewMode) : PRESETS[preset].agentReview
+	return { bin, mode, base: str('base'), preset, confirmShip, agentReview }
 }
