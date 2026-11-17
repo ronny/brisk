@@ -307,7 +307,7 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
      "rule_hits": [],
      "findings": null,
      "model_risk": 0.101,
-     "duration_ms": 16,
+     "duration_ms": 17,
      "preset": "reviewed",
      "thresholds": {
       "high": 0.872,
@@ -356,7 +356,7 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
      }
     }
    },
-   "text": "Risk: LOW  impact 0.0/3  uncertainty 0.0/3\n1 files, +1 -1\nAction: No extra review needed.\n(host, jev-1.14.0, 16 ms)\n",
+   "text": "Risk: LOW  impact 0.0/3  uncertainty 0.0/3\n1 files, +1 -1\nAction: No extra review needed.\n(host, jev-1.14.0, 15 ms)\n",
    "presets": {
     "autonomous": {
      "tier": "low",
@@ -427,7 +427,7 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
      },
      "destroys_data": {
       "type": "noul",
-      "noul": 0.01
+      "noul": 0.02
      },
      "impact": {
       "type": "score",
@@ -536,7 +536,7 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
     "tier": "high",
     "floor": "high",
     "impact": 2.99,
-    "uncertainty": 2.96,
+    "uncertainty": 2.97,
     "action": "Get a second review of the listed reasons before shipping.",
     "agent_review": {
      "recommended": true,
@@ -547,7 +547,7 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
        "area": "Access checks",
        "source": "brisk",
        "required": true,
-       "score": 2.93,
+       "score": 2.94,
        "evidence": [
         {
          "path": "backend/internal/web/documents.go",
@@ -585,7 +585,7 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
       ]
      },
      {
-      "text": "May weaken access checks (model: 0.95)",
+      "text": "May weaken access checks (model: 0.97)",
       "source": "question",
       "id": "weakens_auth",
       "tier": "high"
@@ -623,31 +623,32 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
       }
      ],
      "model_risk": 0.463,
-     "duration_ms": 91,
+     "duration_ms": 93,
      "preset": "reviewed",
      "thresholds": {
       "high": 0.872,
       "medium": 0.872
      },
      "review_plan": {
+      "status": "tailored",
       "tailored": true,
       "scores": {
-       "access_checks": 2.93
+       "access_checks": 2.94
       },
       "dropped": []
      },
      "answers": {
       "breaks_contract": {
        "type": "noul",
-       "noul": 0.5
+       "noul": 0.54
       },
       "breaks_deploy": {
        "type": "noul",
-       "noul": 0.18
+       "noul": 0.19
       },
       "destroys_data": {
        "type": "noul",
-       "noul": 0.54
+       "noul": 0.49
       },
       "impact": {
        "type": "score",
@@ -662,23 +663,23 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
       },
       "uncertainty": {
        "type": "score",
-       "score": 2.96,
-       "confidence": 0.97,
+       "score": 2.97,
+       "confidence": 0.98,
        "probabilities": {
         "0": 0,
         "1": 0,
-        "2": 0.03,
-        "3": 0.97
+        "2": 0.02,
+        "3": 0.98
        }
       },
       "weakens_auth": {
        "type": "noul",
-       "noul": 0.95
+       "noul": 0.97
       }
      }
     }
    },
-   "text": "Risk: HIGH (rules floor: high)  impact 3.0/3  uncertainty 3.0/3\n1 files, +0 -5\n  - Changes logic inside an access check [language lang:auth_logic_changed]\n      backend/internal/web/documents.go:13 (*Server).EditDocument\n  - May weaken access checks (model: 0.95) [question weakens_auth]\n  - High impact if wrong (model: 3.0 of 3) [question impact]\nAction: Get a second review of the listed reasons before shipping.\nAgent review: recommended. The change is High risk.\n(host, jev-1.14.0, 109 ms)\n",
+   "text": "Risk: HIGH (rules floor: high)  impact 3.0/3  uncertainty 3.0/3\n1 files, +0 -5\n  - Changes logic inside an access check [language lang:auth_logic_changed]\n      backend/internal/web/documents.go:13 (*Server).EditDocument\n  - May weaken access checks (model: 0.97) [question weakens_auth]\n  - High impact if wrong (model: 3.0 of 3) [question impact]\nAction: Get a second review of the listed reasons before shipping.\nAgent review: recommended. The change is High risk.\n(host, jev-1.14.0, 126 ms)\n",
    "presets": {
     "autonomous": {
      "tier": "high",
@@ -693,7 +694,7 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
         "area": "Access checks",
         "source": "brisk",
         "required": true,
-        "score": 2.93,
+        "score": 2.94,
         "evidence": [
          {
           "path": "backend/internal/web/documents.go",
@@ -710,6 +711,19 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
          {
           "id": "access_checks.2",
           "text": "Find or add a test that a caller without access is denied."
+         }
+        ]
+       },
+       {
+        "id": "weak_verification",
+        "area": "Untested behaviour",
+        "source": "brisk",
+        "required": false,
+        "evidence": [],
+        "checks": [
+         {
+          "id": "weak_verification.1",
+          "text": "Find the behaviour the change alters that no test covers, and add or run a test for it."
          }
         ]
        }
@@ -733,7 +747,7 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
         "area": "Access checks",
         "source": "brisk",
         "required": true,
-        "score": 2.93,
+        "score": 2.94,
         "evidence": [
          {
           "path": "backend/internal/web/documents.go",
@@ -773,7 +787,7 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
         "area": "Access checks",
         "source": "brisk",
         "required": true,
-        "score": 2.93,
+        "score": 2.94,
         "evidence": [
          {
           "path": "backend/internal/web/documents.go",
@@ -790,6 +804,32 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
          {
           "id": "access_checks.2",
           "text": "Find or add a test that a caller without access is denied."
+         }
+        ]
+       },
+       {
+        "id": "data_loss",
+        "area": "Data deletion",
+        "source": "brisk",
+        "required": false,
+        "evidence": [],
+        "checks": [
+         {
+          "id": "data_loss.1",
+          "text": "Confirm the deleted or dropped data is backed up or no longer read anywhere."
+         }
+        ]
+       },
+       {
+        "id": "weak_verification",
+        "area": "Untested behaviour",
+        "source": "brisk",
+        "required": false,
+        "evidence": [],
+        "checks": [
+         {
+          "id": "weak_verification.1",
+          "text": "Find the behaviour the change alters that no test covers, and add or run a test for it."
          }
         ]
        }
@@ -852,7 +892,7 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
        "checks": [
         {
          "id": "project_rule.1",
-         "text": "Check the change against the project rule that fired; its reason is in the assessment."
+         "text": "Check the change against the project rule or question that flagged it, by its id in the assessment's provenance."
         }
        ]
       },
@@ -886,7 +926,7 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
        "area": "Document sharing",
        "source": "config",
        "required": true,
-       "score": 2.68,
+       "score": 2.56,
        "evidence": [
         {
          "path": "backend/internal/web/documents.go",
@@ -904,14 +944,28 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
          "text": "Find or add a test that another workspace member cannot open a private document."
         }
        ]
+      },
+      {
+       "id": "data_loss",
+       "area": "Data deletion",
+       "source": "brisk",
+       "required": false,
+       "evidence": [],
+       "checks": [
+        {
+         "id": "data_loss.1",
+         "text": "Confirm the deleted or dropped data is backed up or no longer read anywhere."
+        }
+       ]
       }
      ]
     },
     "review_plan": {
+     "status": "tailored",
      "tailored": true,
      "scores": {
       "access_checks": 2.96,
-      "config_document_access": 2.68
+      "config_document_access": 2.56
      },
      "dropped": []
     },
@@ -922,23 +976,23 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
     "answers": {
      "breaks_contract": {
       "type": "noul",
-      "noul": 0.52
+      "noul": 0.51
      },
      "breaks_deploy": {
       "type": "noul",
-      "noul": 0.19
+      "noul": 0.24
      },
      "changes_document_access": {
       "type": "noul",
-      "noul": 0.95
+      "noul": 0.94
      },
      "destroys_data": {
       "type": "noul",
-      "noul": 0.53
+      "noul": 0.5
      },
      "impact": {
       "type": "score",
-      "score": 3,
+      "score": 2.99,
       "confidence": 1,
       "probabilities": {
        "0": 0,
@@ -949,13 +1003,13 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
      },
      "uncertainty": {
       "type": "score",
-      "score": 2.97,
-      "confidence": 0.98,
+      "score": 2.96,
+      "confidence": 0.97,
       "probabilities": {
        "0": 0,
        "1": 0,
-       "2": 0.02,
-       "3": 0.98
+       "2": 0.03,
+       "3": 0.97
       }
      },
      "weakens_auth": {
@@ -1027,7 +1081,7 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
    "final": {
     "tier": "low",
     "floor": "low",
-    "impact": 1.08,
+    "impact": 1.14,
     "uncertainty": 0.08,
     "action": "No extra review needed.",
     "agent_review": {
@@ -1039,7 +1093,6 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
        "area": "Interfaces other code relies on",
        "source": "brisk",
        "required": false,
-       "score": 1.01,
        "evidence": [
         {
          "path": "frontend/src/components/DocumentList.tsx",
@@ -1083,28 +1136,27 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
        "language": "tsx"
       }
      ],
-     "model_risk": 0.346,
-     "duration_ms": 141,
+     "model_risk": 0.35,
+     "duration_ms": 108,
      "preset": "reviewed",
      "thresholds": {
       "high": 0.872,
       "medium": 0.872
      },
      "review_plan": {
-      "tailored": true,
-      "scores": {
-       "contracts": 1.01
-      },
+      "status": "not_asked",
+      "tailored": false,
+      "scores": {},
       "dropped": []
      },
      "answers": {
       "breaks_contract": {
        "type": "noul",
-       "noul": 0.21
+       "noul": 0.18
       },
       "breaks_deploy": {
        "type": "noul",
-       "noul": 0.08
+       "noul": 0.09
       },
       "destroys_data": {
        "type": "noul",
@@ -1112,12 +1164,12 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
       },
       "impact": {
        "type": "score",
-       "score": 1.08,
-       "confidence": 0.59,
+       "score": 1.14,
+       "confidence": 0.55,
        "probabilities": {
-        "0": 0.17,
-        "1": 0.59,
-        "2": 0.24,
+        "0": 0.16,
+        "1": 0.55,
+        "2": 0.29,
         "3": 0
        }
       },
@@ -1139,7 +1191,7 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
      }
     }
    },
-   "text": "Risk: LOW  impact 1.1/3  uncertainty 0.1/3\n1 files, +13 -5\nAction: No extra review needed.\n(host, jev-1.14.0, 67 ms)\n",
+   "text": "Risk: LOW  impact 1.1/3  uncertainty 0.1/3\n1 files, +13 -5\nAction: No extra review needed.\n(host, jev-1.14.0, 81 ms)\n",
    "presets": {
     "autonomous": {
      "tier": "low",
@@ -1154,7 +1206,6 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
         "area": "Interfaces other code relies on",
         "source": "brisk",
         "required": false,
-        "score": 1.01,
         "evidence": [
          {
           "path": "frontend/src/components/DocumentList.tsx",
@@ -1190,7 +1241,6 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
         "area": "Interfaces other code relies on",
         "source": "brisk",
         "required": false,
-        "score": 1.01,
         "evidence": [
          {
           "path": "frontend/src/components/DocumentList.tsx",
@@ -1226,7 +1276,6 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
         "area": "Interfaces other code relies on",
         "source": "brisk",
         "required": false,
-        "score": 1.01,
         "evidence": [
          {
           "path": "frontend/src/components/DocumentList.tsx",
@@ -1263,7 +1312,6 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
        "area": "Interfaces other code relies on",
        "source": "brisk",
        "required": false,
-       "score": 1.09,
        "evidence": [
         {
          "path": "frontend/src/components/DocumentList.tsx",
@@ -1282,10 +1330,9 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
      ]
     },
     "review_plan": {
-     "tailored": true,
-     "scores": {
-      "contracts": 1.09
-     },
+     "status": "not_asked",
+     "tailored": false,
+     "scores": {},
      "dropped": []
     },
     "rule_hits": [
@@ -1294,11 +1341,11 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
     "answers": {
      "breaks_contract": {
       "type": "noul",
-      "noul": 0.19
+      "noul": 0.18
      },
      "breaks_deploy": {
       "type": "noul",
-      "noul": 0.09
+      "noul": 0.08
      },
      "changes_document_access": {
       "type": "noul",
@@ -1310,22 +1357,22 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
      },
      "impact": {
       "type": "score",
-      "score": 1.15,
-      "confidence": 0.55,
+      "score": 1.18,
+      "confidence": 0.6,
       "probabilities": {
-       "0": 0.15,
-       "1": 0.55,
-       "2": 0.3,
+       "0": 0.11,
+       "1": 0.6,
+       "2": 0.29,
        "3": 0
       }
      },
      "uncertainty": {
       "type": "score",
-      "score": 0.09,
-      "confidence": 0.91,
+      "score": 0.07,
+      "confidence": 0.93,
       "probabilities": {
-       "0": 0.92,
-       "1": 0.07,
+       "0": 0.94,
+       "1": 0.05,
        "2": 0.01,
        "3": 0
       }
@@ -1419,8 +1466,8 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
    "final": {
     "tier": "medium",
     "floor": "medium",
-    "impact": 2.28,
-    "uncertainty": 2.57,
+    "impact": 2.26,
+    "uncertainty": 2.63,
     "action": "Review the files named in the reasons before shipping.",
     "agent_review": {
      "recommended": false,
@@ -1431,7 +1478,6 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
        "area": "Stored data and migrations",
        "source": "brisk",
        "required": false,
-       "score": 2.7,
        "evidence": [
         {
          "path": "backend/internal/db/migrations/0007_archive_documents.down.sql"
@@ -1484,24 +1530,23 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
       "migration"
      ],
      "findings": null,
-     "model_risk": 0.386,
-     "duration_ms": 15,
+     "model_risk": 0.387,
+     "duration_ms": 19,
      "preset": "reviewed",
      "thresholds": {
       "high": 0.872,
       "medium": 0.872
      },
      "review_plan": {
-      "tailored": true,
-      "scores": {
-       "stored_data": 2.7
-      },
+      "status": "not_asked",
+      "tailored": false,
+      "scores": {},
       "dropped": []
      },
      "answers": {
       "breaks_contract": {
        "type": "noul",
-       "noul": 0.19
+       "noul": 0.2
       },
       "breaks_deploy": {
        "type": "noul",
@@ -1509,38 +1554,38 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
       },
       "destroys_data": {
        "type": "noul",
-       "noul": 0.42
+       "noul": 0.4
       },
       "impact": {
        "type": "score",
-       "score": 2.28,
-       "confidence": 0.55,
+       "score": 2.26,
+       "confidence": 0.6,
        "probabilities": {
         "0": 0,
-        "1": 0.08,
-        "2": 0.55,
-        "3": 0.37
+        "1": 0.07,
+        "2": 0.6,
+        "3": 0.33
        }
       },
       "uncertainty": {
        "type": "score",
-       "score": 2.57,
-       "confidence": 0.56,
+       "score": 2.63,
+       "confidence": 0.63,
        "probabilities": {
         "0": 0.07,
-        "1": 0.06,
-        "2": 0.11,
-        "3": 0.76
+        "1": 0.04,
+        "2": 0.08,
+        "3": 0.81
        }
       },
       "weakens_auth": {
        "type": "noul",
-       "noul": 0.03
+       "noul": 0.04
       }
      }
     }
    },
-   "text": "Risk: MEDIUM (rules floor: medium)  impact 2.3/3  uncertainty 2.6/3\n2 files, +4 -0\n  - Changes a database migration [rule migration]\n      backend/internal/db/migrations/0007_archive_documents.down.sql, backend/internal/db/migrations/0007_archive_documents.up.sql\nAction: Review the files named in the reasons before shipping.\n(host, jev-1.14.0, 14 ms)\n",
+   "text": "Risk: MEDIUM (rules floor: medium)  impact 2.3/3  uncertainty 2.6/3\n2 files, +4 -0\n  - Changes a database migration [rule migration]\n      backend/internal/db/migrations/0007_archive_documents.down.sql, backend/internal/db/migrations/0007_archive_documents.up.sql\nAction: Review the files named in the reasons before shipping.\n(host, jev-1.14.0, 20 ms)\n",
    "presets": {
     "autonomous": {
      "tier": "medium",
@@ -1555,7 +1600,7 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
         "area": "Stored data and migrations",
         "source": "brisk",
         "required": false,
-        "score": 2.7,
+        "score": 2.73,
         "evidence": [
          {
           "path": "backend/internal/db/migrations/0007_archive_documents.down.sql"
@@ -1572,6 +1617,19 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
          {
           "id": "stored_data.2",
           "text": "Confirm old app versions still work while the change deploys."
+         }
+        ]
+       },
+       {
+        "id": "weak_verification",
+        "area": "Untested behaviour",
+        "source": "brisk",
+        "required": false,
+        "evidence": [],
+        "checks": [
+         {
+          "id": "weak_verification.1",
+          "text": "Find the behaviour the change alters that no test covers, and add or run a test for it."
          }
         ]
        }
@@ -1595,7 +1653,6 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
         "area": "Stored data and migrations",
         "source": "brisk",
         "required": false,
-        "score": 2.7,
         "evidence": [
          {
           "path": "backend/internal/db/migrations/0007_archive_documents.down.sql"
@@ -1635,7 +1692,7 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
         "area": "Stored data and migrations",
         "source": "brisk",
         "required": false,
-        "score": 2.7,
+        "score": 2.73,
         "evidence": [
          {
           "path": "backend/internal/db/migrations/0007_archive_documents.down.sql"
@@ -1652,6 +1709,32 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
          {
           "id": "stored_data.2",
           "text": "Confirm old app versions still work while the change deploys."
+         }
+        ]
+       },
+       {
+        "id": "data_loss",
+        "area": "Data deletion",
+        "source": "brisk",
+        "required": false,
+        "evidence": [],
+        "checks": [
+         {
+          "id": "data_loss.1",
+          "text": "Confirm the deleted or dropped data is backed up or no longer read anywhere."
+         }
+        ]
+       },
+       {
+        "id": "weak_verification",
+        "area": "Untested behaviour",
+        "source": "brisk",
+        "required": false,
+        "evidence": [],
+        "checks": [
+         {
+          "id": "weak_verification.1",
+          "text": "Find the behaviour the change alters that no test covers, and add or run a test for it."
          }
         ]
        }
@@ -1691,7 +1774,6 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
        "area": "Stored data and migrations",
        "source": "brisk",
        "required": false,
-       "score": 2.73,
        "evidence": [
         {
          "path": "backend/internal/db/migrations/0007_archive_documents.down.sql"
@@ -1714,10 +1796,9 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
      ]
     },
     "review_plan": {
-     "tailored": true,
-     "scores": {
-      "stored_data": 2.73
-     },
+     "status": "not_asked",
+     "tailored": false,
+     "scores": {},
      "dropped": []
     },
     "rule_hits": [
@@ -1726,15 +1807,15 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
     "answers": {
      "breaks_contract": {
       "type": "noul",
-      "noul": 0.18
+      "noul": 0.19
      },
      "breaks_deploy": {
       "type": "noul",
-      "noul": 0.23
+      "noul": 0.26
      },
      "changes_document_access": {
       "type": "noul",
-      "noul": 0.1
+      "noul": 0.11
      },
      "destroys_data": {
       "type": "noul",
@@ -1742,24 +1823,24 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
      },
      "impact": {
       "type": "score",
-      "score": 2.26,
-      "confidence": 0.56,
+      "score": 2.21,
+      "confidence": 0.58,
       "probabilities": {
        "0": 0,
-       "1": 0.09,
-       "2": 0.56,
-       "3": 0.35
+       "1": 0.1,
+       "2": 0.58,
+       "3": 0.32
       }
      },
      "uncertainty": {
       "type": "score",
-      "score": 2.58,
-      "confidence": 0.6,
+      "score": 2.53,
+      "confidence": 0.53,
       "probabilities": {
        "0": 0.07,
-       "1": 0.05,
-       "2": 0.09,
-       "3": 0.79
+       "1": 0.07,
+       "2": 0.12,
+       "3": 0.74
       }
      },
      "weakens_auth": {
@@ -1864,7 +1945,7 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
     "tier": "high",
     "floor": "high",
     "impact": 2.97,
-    "uncertainty": 2.83,
+    "uncertainty": 2.84,
     "action": "Get a second review of the listed reasons before shipping.",
     "agent_review": {
      "recommended": true,
@@ -1875,7 +1956,7 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
        "area": "Data deletion",
        "source": "brisk",
        "required": true,
-       "score": 2.86,
+       "score": 2.83,
        "evidence": [
         {
          "path": "backend/internal/db/migrations/0007_drop_owner.up.sql",
@@ -1895,7 +1976,7 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
        "area": "Stored data and migrations",
        "source": "brisk",
        "required": false,
-       "score": 2.94,
+       "score": 2.95,
        "evidence": [
         {
          "path": "backend/internal/db/migrations/0007_drop_owner.up.sql"
@@ -1958,28 +2039,29 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
      ],
      "findings": null,
      "model_risk": 0.356,
-     "duration_ms": 13,
+     "duration_ms": 18,
      "preset": "reviewed",
      "thresholds": {
       "high": 0.872,
       "medium": 0.872
      },
      "review_plan": {
+      "status": "tailored",
       "tailored": true,
       "scores": {
-       "data_loss": 2.86,
-       "stored_data": 2.94
+       "data_loss": 2.83,
+       "stored_data": 2.95
       },
       "dropped": []
      },
      "answers": {
       "breaks_contract": {
        "type": "noul",
-       "noul": 0.89
+       "noul": 0.87
       },
       "breaks_deploy": {
        "type": "noul",
-       "noul": 0.64
+       "noul": 0.63
       },
       "destroys_data": {
        "type": "noul",
@@ -1988,33 +2070,33 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
       "impact": {
        "type": "score",
        "score": 2.97,
-       "confidence": 0.98,
+       "confidence": 0.97,
        "probabilities": {
         "0": 0,
         "1": 0,
-        "2": 0.02,
-        "3": 0.98
+        "2": 0.03,
+        "3": 0.97
        }
       },
       "uncertainty": {
        "type": "score",
-       "score": 2.83,
-       "confidence": 0.83,
+       "score": 2.84,
+       "confidence": 0.84,
        "probabilities": {
         "0": 0.03,
         "1": 0.01,
-        "2": 0.06,
-        "3": 0.9
+        "2": 0.05,
+        "3": 0.91
        }
       },
       "weakens_auth": {
        "type": "noul",
-       "noul": 0.33
+       "noul": 0.29
       }
      }
     }
    },
-   "text": "Risk: HIGH (rules floor: high)  impact 3.0/3  uncertainty 2.8/3\n1 files, +1 -0\n  - Adds destructive SQL [rule destructive_sql]\n      backend/internal/db/migrations/0007_drop_owner.up.sql:1\n  - May delete or corrupt stored data (model: 0.97) [question destroys_data]\n  - High impact if wrong (model: 3.0 of 3) [question impact]\nAction: Get a second review of the listed reasons before shipping.\nAgent review: recommended. The change is High risk.\n(host, jev-1.14.0, 13 ms)\n",
+   "text": "Risk: HIGH (rules floor: high)  impact 3.0/3  uncertainty 2.8/3\n1 files, +1 -0\n  - Adds destructive SQL [rule destructive_sql]\n      backend/internal/db/migrations/0007_drop_owner.up.sql:1\n  - May delete or corrupt stored data (model: 0.97) [question destroys_data]\n  - High impact if wrong (model: 3.0 of 3) [question impact]\nAction: Get a second review of the listed reasons before shipping.\nAgent review: recommended. The change is High risk.\n(host, jev-1.14.0, 18 ms)\n",
    "presets": {
     "autonomous": {
      "tier": "high",
@@ -2029,7 +2111,7 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
         "area": "Data deletion",
         "source": "brisk",
         "required": true,
-        "score": 2.86,
+        "score": 2.83,
         "evidence": [
          {
           "path": "backend/internal/db/migrations/0007_drop_owner.up.sql",
@@ -2049,7 +2131,7 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
         "area": "Stored data and migrations",
         "source": "brisk",
         "required": false,
-        "score": 2.94,
+        "score": 2.95,
         "evidence": [
          {
           "path": "backend/internal/db/migrations/0007_drop_owner.up.sql"
@@ -2063,6 +2145,19 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
          {
           "id": "stored_data.2",
           "text": "Confirm old app versions still work while the change deploys."
+         }
+        ]
+       },
+       {
+        "id": "weak_verification",
+        "area": "Untested behaviour",
+        "source": "brisk",
+        "required": false,
+        "evidence": [],
+        "checks": [
+         {
+          "id": "weak_verification.1",
+          "text": "Find the behaviour the change alters that no test covers, and add or run a test for it."
          }
         ]
        }
@@ -2086,7 +2181,7 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
         "area": "Data deletion",
         "source": "brisk",
         "required": true,
-        "score": 2.86,
+        "score": 2.83,
         "evidence": [
          {
           "path": "backend/internal/db/migrations/0007_drop_owner.up.sql",
@@ -2106,7 +2201,7 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
         "area": "Stored data and migrations",
         "source": "brisk",
         "required": false,
-        "score": 2.94,
+        "score": 2.95,
         "evidence": [
          {
           "path": "backend/internal/db/migrations/0007_drop_owner.up.sql"
@@ -2143,7 +2238,7 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
         "area": "Data deletion",
         "source": "brisk",
         "required": true,
-        "score": 2.86,
+        "score": 2.83,
         "evidence": [
          {
           "path": "backend/internal/db/migrations/0007_drop_owner.up.sql",
@@ -2163,7 +2258,7 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
         "area": "Stored data and migrations",
         "source": "brisk",
         "required": false,
-        "score": 2.94,
+        "score": 2.95,
         "evidence": [
          {
           "path": "backend/internal/db/migrations/0007_drop_owner.up.sql"
@@ -2177,6 +2272,19 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
          {
           "id": "stored_data.2",
           "text": "Confirm old app versions still work while the change deploys."
+         }
+        ]
+       },
+       {
+        "id": "weak_verification",
+        "area": "Untested behaviour",
+        "source": "brisk",
+        "required": false,
+        "evidence": [],
+        "checks": [
+         {
+          "id": "weak_verification.1",
+          "text": "Find the behaviour the change alters that no test covers, and add or run a test for it."
          }
         ]
        }
@@ -2206,7 +2314,7 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
       ]
      },
      {
-      "text": "May delete or corrupt stored data (model: 0.96)",
+      "text": "May delete or corrupt stored data (model: 0.97)",
       "source": "question",
       "id": "destroys_data",
       "tier": "high"
@@ -2227,7 +2335,7 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
        "area": "Data deletion",
        "source": "brisk",
        "required": true,
-       "score": 2.85,
+       "score": 2.82,
        "evidence": [
         {
          "path": "backend/internal/db/migrations/0007_drop_owner.up.sql",
@@ -2247,7 +2355,7 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
        "area": "Stored data and migrations",
        "source": "brisk",
        "required": false,
-       "score": 2.94,
+       "score": 2.95,
        "evidence": [
         {
          "path": "backend/internal/db/migrations/0007_drop_owner.up.sql"
@@ -2267,10 +2375,11 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
      ]
     },
     "review_plan": {
+     "status": "tailored",
      "tailored": true,
      "scores": {
-      "data_loss": 2.85,
-      "stored_data": 2.94
+      "data_loss": 2.82,
+      "stored_data": 2.95
      },
      "dropped": []
     },
@@ -2281,19 +2390,19 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
     "answers": {
      "breaks_contract": {
       "type": "noul",
-      "noul": 0.89
+      "noul": 0.87
      },
      "breaks_deploy": {
       "type": "noul",
-      "noul": 0.63
+      "noul": 0.62
      },
      "changes_document_access": {
       "type": "noul",
-      "noul": 0.42
+      "noul": 0.41
      },
      "destroys_data": {
       "type": "noul",
-      "noul": 0.96
+      "noul": 0.97
      },
      "impact": {
       "type": "score",
@@ -2370,12 +2479,30 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
     "tier": "medium",
     "floor": "low",
     "impact": 2.71,
-    "uncertainty": 1.4,
+    "uncertainty": 1.46,
     "action": "Review the files named in the reasons before shipping.",
     "agent_review": {
      "recommended": true,
-     "reason": "May weaken access checks (Jev: 0.70).",
-     "plan": []
+     "reason": "May weaken access checks (Jev: 0.72).",
+     "plan": [
+      {
+       "id": "access_checks",
+       "area": "Access checks",
+       "source": "brisk",
+       "required": false,
+       "evidence": [],
+       "checks": [
+        {
+         "id": "access_checks.1",
+         "text": "List who can reach this code after the change and confirm each caller is allowed."
+        },
+        {
+         "id": "access_checks.2",
+         "text": "Find or add a test that a caller without access is denied."
+        }
+       ]
+      }
+     ]
     },
     "reasons": [
      {
@@ -2398,22 +2525,27 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
      "diff_hash": "sha256:57013d029bda3eb8c728ad1a06a95383fad522023da27347ad399cfde5d79493",
      "rule_hits": [],
      "findings": null,
-     "model_risk": 0.329,
-     "duration_ms": 126,
+     "model_risk": 0.331,
+     "duration_ms": 111,
      "preset": "reviewed",
      "thresholds": {
       "high": 0.872,
       "medium": 0.872
      },
-     "review_plan": null,
+     "review_plan": {
+      "status": "not_asked",
+      "tailored": false,
+      "scores": {},
+      "dropped": []
+     },
      "answers": {
       "breaks_contract": {
        "type": "noul",
-       "noul": 0.5
+       "noul": 0.53
       },
       "breaks_deploy": {
        "type": "noul",
-       "noul": 0.22
+       "noul": 0.25
       },
       "destroys_data": {
        "type": "noul",
@@ -2422,33 +2554,33 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
       "impact": {
        "type": "score",
        "score": 2.71,
-       "confidence": 0.71,
+       "confidence": 0.72,
        "probabilities": {
         "0": 0,
         "1": 0.03,
-        "2": 0.23,
-        "3": 0.74
+        "2": 0.22,
+        "3": 0.75
        }
       },
       "uncertainty": {
        "type": "score",
-       "score": 1.4,
-       "confidence": 0.17,
+       "score": 1.46,
+       "confidence": 0.25,
        "probabilities": {
-        "0": 0.27,
-        "1": 0.18,
-        "2": 0.44,
+        "0": 0.24,
+        "1": 0.16,
+        "2": 0.49,
         "3": 0.11
        }
       },
       "weakens_auth": {
        "type": "noul",
-       "noul": 0.7
+       "noul": 0.72
       }
      }
     }
    },
-   "text": "Risk: MEDIUM  impact 2.7/3  uncertainty 1.4/3\n1 files, +1 -1\n  - High impact if wrong (model: 2.7 of 3) [question impact]\nAction: Review the files named in the reasons before shipping.\nAgent review: recommended. May weaken access checks (Jev: 0.70).\n(host, jev-1.14.0, 101 ms)\n",
+   "text": "Risk: MEDIUM  impact 2.7/3  uncertainty 1.5/3\n1 files, +1 -1\n  - High impact if wrong (model: 2.7 of 3) [question impact]\nAction: Review the files named in the reasons before shipping.\nAgent review: recommended. May weaken access checks (Jev: 0.72).\n(host, jev-1.14.0, 104 ms)\n",
    "presets": {
     "autonomous": {
      "tier": "medium",
@@ -2456,8 +2588,26 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
      "action": "Check the listed reasons yourself before shipping.",
      "agent_review": {
       "recommended": true,
-      "reason": "May weaken access checks (Jev: 0.70).",
-      "plan": []
+      "reason": "May weaken access checks (Jev: 0.72).",
+      "plan": [
+       {
+        "id": "access_checks",
+        "area": "Access checks",
+        "source": "brisk",
+        "required": false,
+        "evidence": [],
+        "checks": [
+         {
+          "id": "access_checks.1",
+          "text": "List who can reach this code after the change and confirm each caller is allowed."
+         },
+         {
+          "id": "access_checks.2",
+          "text": "Find or add a test that a caller without access is denied."
+         }
+        ]
+       }
+      ]
      },
      "thresholds": {
       "high": 0.8128,
@@ -2470,8 +2620,26 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
      "action": "Review the files named in the reasons before shipping.",
      "agent_review": {
       "recommended": true,
-      "reason": "May weaken access checks (Jev: 0.70).",
-      "plan": []
+      "reason": "May weaken access checks (Jev: 0.72).",
+      "plan": [
+       {
+        "id": "access_checks",
+        "area": "Access checks",
+        "source": "brisk",
+        "required": false,
+        "evidence": [],
+        "checks": [
+         {
+          "id": "access_checks.1",
+          "text": "List who can reach this code after the change and confirm each caller is allowed."
+         },
+         {
+          "id": "access_checks.2",
+          "text": "Find or add a test that a caller without access is denied."
+         }
+        ]
+       }
+      ]
      },
      "thresholds": {
       "high": 0.872,
@@ -2485,7 +2653,25 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
      "agent_review": {
       "recommended": true,
       "reason": "The change is Medium risk.",
-      "plan": []
+      "plan": [
+       {
+        "id": "access_checks",
+        "area": "Access checks",
+        "source": "brisk",
+        "required": false,
+        "evidence": [],
+        "checks": [
+         {
+          "id": "access_checks.1",
+          "text": "List who can reach this code after the change and confirm each caller is allowed."
+         },
+         {
+          "id": "access_checks.2",
+          "text": "Find or add a test that a caller without access is denied."
+         }
+        ]
+       }
+      ]
      },
      "thresholds": {
       "high": 0.7261,
@@ -2516,7 +2702,7 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
       ]
      },
      {
-      "text": "Changes who can see or edit a document (SEC-3). (model: 0.93)",
+      "text": "Changes who can see or edit a document (SEC-3). (model: 0.94)",
       "source": "question",
       "id": "changes_document_access",
       "tier": "high"
@@ -2541,7 +2727,7 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
        "checks": [
         {
          "id": "project_rule.1",
-         "text": "Check the change against the project rule that fired; its reason is in the assessment."
+         "text": "Check the change against the project rule or question that flagged it, by its id in the assessment's provenance."
         }
        ]
       },
@@ -2550,7 +2736,7 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
        "area": "Document sharing",
        "source": "config",
        "required": true,
-       "score": 2.83,
+       "score": 2.76,
        "evidence": [
         {
          "path": "backend/internal/docs/visibility.go",
@@ -2568,13 +2754,31 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
          "text": "Find or add a test that another workspace member cannot open a private document."
         }
        ]
+      },
+      {
+       "id": "access_checks",
+       "area": "Access checks",
+       "source": "brisk",
+       "required": false,
+       "evidence": [],
+       "checks": [
+        {
+         "id": "access_checks.1",
+         "text": "List who can reach this code after the change and confirm each caller is allowed."
+        },
+        {
+         "id": "access_checks.2",
+         "text": "Find or add a test that a caller without access is denied."
+        }
+       ]
       }
      ]
     },
     "review_plan": {
+     "status": "tailored",
      "tailored": true,
      "scores": {
-      "config_document_access": 2.83
+      "config_document_access": 2.76
      },
      "dropped": []
     },
@@ -2584,15 +2788,15 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
     "answers": {
      "breaks_contract": {
       "type": "noul",
-      "noul": 0.54
+      "noul": 0.53
      },
      "breaks_deploy": {
       "type": "noul",
-      "noul": 0.24
+      "noul": 0.26
      },
      "changes_document_access": {
       "type": "noul",
-      "noul": 0.93
+      "noul": 0.94
      },
      "destroys_data": {
       "type": "noul",
@@ -2600,29 +2804,29 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
      },
      "impact": {
       "type": "score",
-      "score": 2.72,
-      "confidence": 0.72,
+      "score": 2.74,
+      "confidence": 0.75,
       "probabilities": {
        "0": 0,
        "1": 0.03,
-       "2": 0.22,
-       "3": 0.75
+       "2": 0.19,
+       "3": 0.78
       }
      },
      "uncertainty": {
       "type": "score",
-      "score": 1.47,
-      "confidence": 0.17,
+      "score": 1.49,
+      "confidence": 0.16,
       "probabilities": {
        "0": 0.25,
        "1": 0.18,
-       "2": 0.42,
-       "3": 0.15
+       "2": 0.41,
+       "3": 0.16
       }
      },
      "weakens_auth": {
       "type": "noul",
-      "noul": 0.68
+      "noul": 0.77
      }
     }
    }
@@ -3314,10 +3518,16 @@ const REVIEW_AREA_FOR = {auth:'access_checks','lang:auth_logic_changed':'access_
   public_api:'contracts',proto_renumbered:'contracts',breaks_contract:'contracts','lang:exported_signature_changed':'contracts','lang:exported_symbol_removed':'contracts',
   ci_deploy:'build_deploy',breaks_deploy:'build_deploy',dependencies:'dependencies',test_disabled:'tests','lang:test_skipped':'tests','lang:test_deleted':'tests','lang:assertion_removed':'tests',
   'lang:error_swallowed':'error_handling','lang:concurrency_changed':'concurrency',gitignore_hides_code:'hidden_code',nested_repo:'hidden_code',generated_without_source:'hidden_code',generated_hand_edited:'hidden_code',
-  brisk_config:'risk_policy','session:verification_failed':'verification'};
+  brisk_config:'risk_policy','session:verification_failed':'verification',uncertainty:'weak_verification'};
 const PROJECT_CHECKS = ['document_access']; // review_checks keys in project-rules.brisk.yaml
-function planSources(hits, fired, project){
-  // area id -> the hits and fired overrides that support it
+// The answers that meet an agent_review condition of the policy (Policy.ReviewTriggers).
+function reviewTriggers(answers, ar){
+  const out = Object.entries(ar.questions).filter(([q,min]) => answers[q]?.noul != null && answers[q].noul >= min).map(([q]) => q);
+  if (ar.minUnc > 0 && answers.uncertainty?.score != null && answers.uncertainty.score >= ar.minUnc) out.push('uncertainty');
+  return out.sort();
+}
+function planSources(hits, fired, project, triggers=[]){
+  // area id -> the hits, fired overrides and review-triggering answers that support it
   const out = {};
   const add = (area, src) => (out[area] ||= []).push(src);
   for (const h of hits){
@@ -3329,27 +3539,45 @@ function planSources(hits, fired, project){
     if (project && q.startsWith('changes_')) add(PROJECT_CHECKS.includes(q) ? 'config_'+q : 'project_rule', q+' (question)');
     else if (REVIEW_AREA_FOR[q]) add(REVIEW_AREA_FOR[q], q+' (override)');
   }
+  for (const q of triggers) if (REVIEW_AREA_FOR[q]) add(REVIEW_AREA_FOR[q], q+' (answer)');
   return out;
 }
-function planView(ex, withProject){
-  if (withProject && ex.project) return {plan: ex.project.agent_review?.plan || [], prov: ex.project.review_plan, hits: ex.project.rule_hits,
-    fired: CAL.overrides.filter(o=>ansVal(ex.project.answers[o.question])>=o.min).map(o=>o.question).concat(ex.project.answers.changes_document_access?.noul>=0.8?['changes_document_access']:[]), project:true, rec: ex.project.agent_review};
-  return {plan: ex.final.agent_review?.plan || [], prov: ex.final.provenance.review_plan, hits: ex.final.provenance.rule_hits, fired: tierOf(ex).fired.map(o=>o.question), project:false, rec: ex.final.agent_review};
+// variant: 'reviewed' (no .brisk.yaml), a preset name, or 'project'
+function planView(ex, variant){
+  if (variant===true) variant='project';
+  if (!variant) variant='reviewed';
+  if (variant==='project' && ex.project){
+    const ans = ex.project.answers;
+    return {plan: ex.project.agent_review?.plan || [], prov: ex.project.review_plan, hits: ex.project.rule_hits,
+      fired: CAL.overrides.filter(o=>ansVal(ans[o.question])>=o.min).map(o=>o.question).concat(ans.changes_document_access?.noul>=0.8?['changes_document_access']:[]),
+      triggers: reviewTriggers(ans, CORE_PRESETS.reviewed.ar), project:true, rec: ex.project.agent_review};
+  }
+  const a = variant==='reviewed' ? {agent_review: ex.final.agent_review, prov: ex.final.provenance.review_plan} : {agent_review: ex.presets[variant].agent_review, prov: ex.presets[variant].review_plan};
+  return {plan: a.agent_review?.plan || [], prov: a.prov, hits: ex.final.provenance.rule_hits, fired: tierOf(ex).fired.map(o=>o.question),
+    triggers: reviewTriggers(ex.final.provenance.answers, CORE_PRESETS[variant].ar), project:false, rec: a.agent_review};
 }
-// self-check: every plan area must be explained by a hit or a fired override,
-// and every area brisk could build must be in the plan or listed as dropped.
-const PLAN_CHECK = EX.flatMap(ex => [false, true].filter(p => !p || ex.project).flatMap(p => {
-  const v = planView(ex, p), src = planSources(v.hits, [...new Set(v.fired)], v.project), ids = v.plan.map(a=>a.id), dropped = v.prov?.dropped || [];
-  const unexplained = ids.filter(id => !src[id]).map(id => `${ex.key}${p?'@project':''}: ${id} unexplained`);
-  const missing = Object.keys(src).filter(id => !ids.includes(id) && !dropped.includes(id)).map(id => `${ex.key}${p?'@project':''}: ${id} missing`);
-  return [...unexplained, ...missing];
-}));
-if (PLAN_CHECK.length) console.error('plan mismatch', PLAN_CHECK);
-document.documentElement.dataset.plancheck = PLAN_CHECK.length ? 'fail:'+PLAN_CHECK.join('; ') : 'ok';
+// brisk's plan order: required first, led by unscored (High override) ones;
+// then scored areas by score; then unscored ones.
+function planOrderOK(plan){
+  const rank = a => a.required ? (a.score==null ? [0,0] : [1,-a.score]) : (a.score==null ? [3,0] : [2,-a.score]);
+  for (let i=1;i<plan.length;i++){ const x=rank(plan[i-1]), y=rank(plan[i]); if (x[0]>y[0] || (x[0]===y[0] && x[1]>y[1])) return false; }
+  return true;
+}
+// self-check, for every example under no .brisk.yaml, each preset, and the
+// project rules: every plan area is explained by a hit, a fired override or a
+// review-triggering answer; every area brisk could build is planned or
+// dropped; and the plan is in brisk's order.
+function planCheck(){ return EX.flatMap(ex => ['reviewed','autonomous','strict','project'].filter(v => v!=='project' || ex.project).flatMap(variant => {
+  const v = planView(ex, variant), src = planSources(v.hits, [...new Set(v.fired)], v.project, v.triggers), ids = v.plan.map(a=>a.id), dropped = v.prov?.dropped || [];
+  const tag = `${ex.key}@${variant}`;
+  return [...ids.filter(id => !src[id]).map(id => `${tag}: ${id} unexplained`),
+    ...Object.keys(src).filter(id => !ids.includes(id) && !dropped.includes(id)).map(id => `${tag}: ${id} missing`),
+    ...(planOrderOK(v.plan) ? [] : [`${tag}: order`])];
+})); }
 
 let planProject=false;
 function stepPlan(ex){
-  const v = planView(ex, planProject), src = planSources(v.hits, [...new Set(v.fired)], v.project);
+  const v = planView(ex, planProject), src = planSources(v.hits, [...new Set(v.fired)], v.project, v.triggers);
   const scores = v.prov?.scores || {}, dropped = v.prov?.dropped || [];
   const toggle = ex.project ? `<div class="seg" id="planpj"><button class="${!planProject?'on':''}" data-k="0">built-in rules</button><button class="${planProject?'on':''}" data-k="1">with shelf's project rules</button></div>` : '';
   // diagram: sources -> areas -> Jev score (drop line at 1) -> plan order
@@ -3357,7 +3585,7 @@ function stepPlan(ex){
   for (const id of dropped) rows.push({a:{id, area:id, dropped:true}, src: src[id]||[]});
   const H = Math.max(1, rows.length)*58 + 40, W = 1000;
   let g = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto"><defs><marker id="a8" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0L10,5L0,10z" fill="#8a877e"/></marker></defs>`;
-  g += `<text x="0" y="16" font-size="11.5" fill="#6a6a70">rule hit or fired override</text><text x="290" y="16" font-size="11.5" fill="#6a6a70">area (text from brisk's catalog or your .brisk.yaml)</text><text x="640" y="16" font-size="11.5" fill="#6a6a70">Jev: how much to check it, 0–3</text><text x="905" y="16" font-size="11.5" fill="#6a6a70">plan</text>`;
+  g += `<text x="0" y="16" font-size="11.5" fill="#6a6a70">rule hit, fired override, or answer</text><text x="290" y="16" font-size="11.5" fill="#6a6a70">area (text from brisk's catalog or your .brisk.yaml)</text><text x="640" y="16" font-size="11.5" fill="#6a6a70">Jev: how much to check it, 0–3</text><text x="905" y="16" font-size="11.5" fill="#6a6a70">plan</text>`;
   rows.forEach((r, i) => {
     const y = 32 + i*58, a = r.a, cfg = a.source === 'config';
     r.src.forEach((t, k) => { const yy = y + 4 + k*20; g += `<rect x="0" y="${yy}" width="240" height="18" rx="9" fill="#fff" stroke="${RULE_TIER[t]===2||/override|question/.test(t)?COL.high:'#b4b1a8'}"/><text x="10" y="${yy+13}" font-size="10.5" font-family="ui-monospace,monospace">${esc(t.length>34?t.slice(0,33)+'…':t)}</text><path d="M240,${yy+9} L286,${y+22}" stroke="#8a877e" stroke-width="1.3" marker-end="url(#a8)"/>`; });
@@ -3367,7 +3595,7 @@ function stepPlan(ex){
     g += `<line x1="600" y1="${y+22}" x2="634" y2="${y+22}" stroke="#8a877e" stroke-width="1.3" marker-end="url(#a8)"/><rect x="640" y="${y+14}" width="240" height="16" rx="4" fill="#efede8"/>`;
     g += `<line x1="${640+240/3}" y1="${y+8}" x2="${640+240/3}" y2="${y+36}" stroke="${COL.high}" stroke-dasharray="3 2"/>`;
     if (sc != null) g += `<rect x="640" y="${y+14}" width="${240*sc/3}" height="16" rx="4" fill="#9b6fd0"/><text x="${644+240*sc/3}" y="${y+27}" font-size="11" font-family="ui-monospace,monospace">${sc.toFixed(2)}</text>`;
-    else g += `<text x="648" y="${y+27}" font-size="11" fill="#6a6a70">not scored: counts as 3</text>`;
+    else g += `<text x="${640+240/3+8}" y="${y+27}" font-size="11" fill="#6a6a70">${a.required?'not scored: High override, leads':'not scored: ranks after scored'}</text>`;
     g += a.dropped ? `<text x="905" y="${y+27}" font-size="12" fill="${COL.high}" font-weight="650">dropped</text>` : `<circle cx="915" cy="${y+22}" r="11" fill="#24292f"/><text x="915" y="${y+26}" text-anchor="middle" font-size="11" fill="#fff" font-weight="700">${i+1}</text>`;
   });
   if (!rows.length) g += `<text x="290" y="52" font-size="13" fill="#6a6a70">No rule or override supports an area, so the plan is empty.</text>`;
@@ -3375,13 +3603,13 @@ function stepPlan(ex){
   const cards = v.plan.map((a, i) => `<div class="reason"><span class="n">${i+1}</span><div style="flex:1"><b>${esc(a.area)}</b> ${a.source==='config'?'<span class="tag local">.brisk.yaml</span>':'<span class="tag">brisk catalog</span>'} ${a.required?'<span class="tier high">required</span>':''} <span class="mono small">${a.score!=null?'Jev '+a.score.toFixed(2):''}</span>
       <div class="small">${(a.evidence||[]).map(e=>`<span class="mono">${esc(e.path)}${e.start_line?':'+e.start_line:''}${e.symbol?' '+esc(e.symbol):''}</span>`).join(', ')}</div>
       <ul class="small" style="margin:4px 0 0;padding-left:18px">${a.checks.map(c=>`<li>${esc(c.text)} <span class="mono muted">${esc(c.id)}</span></li>`).join('')}</ul></div></div>`).join('');
-  const note = !v.plan.length && v.rec?.recommended
-    ? `<div class="callout">brisk recommends a review here (<i>${esc(v.rec.reason)}</i>) but the plan is empty: the reason came from a yes/no answer below its override, and <span class="mono">impact</span> maps to no area. The plugin then falls back to a review led by brisk's reasons.</div>` : '';
+  const note = v.rec?.recommended && v.prov?.status==='not_asked'
+    ? `<div class="callout">brisk recommends a review here (<i>${esc(v.rec.reason)}</i>), but Jev was not asked to score the plan: the host request had no area to ask about. ${v.plan.length?'The plan\'s areas come from Jev\'s own answers, which arrive with the first call, and areas added that way are never scored.':'The plan is empty.'}</div>` : '';
   return `<div class="row" style="justify-content:space-between;align-items:center"><p class="small muted" style="margin:0;flex:1 1 400px"><span class="mono">agent_review.plan</span> tells a reviewing agent where to look and what to check, most important first. Every word is brisk's catalog or the team's <span class="mono">review_checks</span>. Jev only scores each area in a second call on the same state, so it can drop or reorder areas but never writes what the reviewer reads.</p>${toggle}</div>
     ${g}${note}
     <div class="row"><div class="col" style="flex:3 1 520px">${cards || '<p class="muted">Empty plan.</p>'}</div>
     <div class="col" style="flex:1 1 260px"><div class="grouph">provenance.review_plan</div><pre class="out">${esc(JSON.stringify(v.prov ?? null, null, 1))}</pre>
-    <p class="small muted">Required areas (from a High rule or override) come first and are never dropped; the rest are ordered by Jev's score. Without review answers the plan is brisk's full list and the assessment is not degraded. Here no area scored below 1, so none was dropped.</p></div></div>`;
+    <p class="small muted">Required areas (from a High rule or override) come first and are never dropped; within them, an unscored area from a High override leads. Then come areas by Jev's score, then unscored ones, such as areas added by an answer that met an <span class="mono">agent_review</span> condition. The review call is made only when a review is recommended (<span class="mono">review_when: recommended</span>, setting <span class="mono">agent_review.tailor_plan</span>); otherwise <span class="mono">status</span> is <span class="mono">not_asked</span> and the plan is brisk's full list. Here no area scored below 1, so none was dropped.</p></div></div>`;
 }
 
 let plugConfirm=false, plugOpen=null, plugPreset='reviewed';
@@ -3809,6 +4037,10 @@ function renderLevers(skip){
 const secs=['flows','walk','bad','levers'];
 addEventListener('scroll',()=>{ let cur=secs[0]; for(const id of secs){ if($(id).getBoundingClientRect().top<120) cur=id; } document.querySelectorAll('nav a').forEach(a=>a.classList.toggle('on',a.getAttribute('href')==='#'+cur)); },{passive:true});
 
+// The plan check needs the presets, defined with the levers.
+const PLAN_CHECK = planCheck();
+if (PLAN_CHECK.length) console.error('plan mismatch', PLAN_CHECK);
+document.documentElement.dataset.plancheck = PLAN_CHECK.length ? 'fail:'+PLAN_CHECK.join('; ') : 'ok';
 renderFlow(); renderWalk(); renderLabels(); renderMetrics(); renderLevers();
 dispatchEvent(new Event('scroll'));
 </script>

@@ -189,6 +189,11 @@ CASES="typo handler refactor migration migration-drop visibility"
 PROJECT="$HERE/project-rules.brisk.yaml"
 # Phase 1 (default): host requests and rules-only. Phase 2 (PHASE=2): final
 # assessments from answers written by the brisk_decide_batch plugin tool.
+#
+# Like the Amp plugin, the review plan's questions (review_when: recommended)
+# are asked only when the assessment from the main answers recommends an
+# agent review. Phase 2 then appends those requests (key <case>#review) to
+# req.jsonl and stops; answer them and run phase 2 again.
 if [ "${PHASE:-1}" = 1 ]; then
   : > "$OUT/req.jsonl"
   for c in $CASES; do
@@ -197,35 +202,55 @@ if [ "${PHASE:-1}" = 1 ]; then
     "$BRISK" "${common[@]}" --backend rules-only > "$OUT/$c.rules.json"
     "$BRISK" "${common[@]}" --config "$PROJECT" --backend host > "$OUT/$c.project.host.json"
     git -C "$R" diff main "$c" > "$OUT/$c.diff"
-    # Each host request is two Jev calls on the same state: the calibrated
-    # questions, and the review plan's area scores (key <case>#review).
-    for k in "$c" "$c@project"; do
-      f="$OUT/$c.host.json"; [ "$k" = "$c" ] || f="$OUT/$c.project.host.json"
-      jq -c --arg k "$k" '{key:$k, request_id, state, questions}' "$f" >> "$OUT/req.jsonl"
-      jq -c --arg k "$k#review" 'select(.review_questions != null) | {key:$k, request_id, state, questions: .review_questions}' "$f" >> "$OUT/req.jsonl"
-    done
+    jq -c --arg k "$c" '{key:$k, request_id, state, questions}' "$OUT/$c.host.json" >> "$OUT/req.jsonl"
+    jq -c --arg k "$c@project" '{key:$k, request_id, state, questions}' "$OUT/$c.project.host.json" >> "$OUT/req.jsonl"
   done
 else
   # The last successful answer per key; a retried request leaves an error line too.
+  # With a second argument, the review answers for that key are added.
   answers() {
-    jq -s --arg k "$1" '
+    jq -s --arg k "$1" --arg r "${2:-}" '
       def last_ok($key): map(select(.key==$key and (.error|not)))|last;
-      last_ok($k) as $m | last_ok($k+"#review") as $r
+      last_ok($k) as $m | (if $r == "" then null else last_ok($r) end) as $ra
       | {schema:"brisk.host-answers/v1", request_id:$m.request_id, model:$m.model, answers:$m.answers}
-        + (if $r then {review_answers:$r.answers} else {} end)' "$OUT/ans.jsonl"
+        + (if $ra then {review_answers:$ra.answers} else {} end)' "$OUT/ans.jsonl"
   }
+  has_answer() { jq -e -s --arg k "$1" 'any(.[]; .key==$k and (.error|not))' "$OUT/ans.jsonl" >/dev/null; }
+  pending=0
+  # score OUTFILE KEY HOSTFILE [brisk flags...]: score with the main answers;
+  # when that recommends a review, rescore with the review answers too.
+  score() {
+    local outf=$1 key=$2 host=$3; shift 3
+    answers "$key" > "$OUT/tmp.answers.json"
+    "$BRISK" "${common[@]}" "$@" --answers "$OUT/tmp.answers.json" --format json > "$outf"
+    if jq -e '.agent_review.recommended' "$outf" >/dev/null && jq -e '.review_questions' "$host" >/dev/null; then
+      if has_answer "$key#review"; then
+        answers "$key" "$key#review" > "$OUT/tmp.answers.json"
+        "$BRISK" "${common[@]}" "$@" --answers "$OUT/tmp.answers.json" --format json > "$outf"
+      elif ! grep -q "\"key\":\"$key#review\"" "$OUT/req.jsonl"; then
+        jq -c --arg k "$key#review" '{key:$k, request_id, state, questions: .review_questions}' "$host" >> "$OUT/req.jsonl"
+        pending=1
+      else
+        pending=1
+      fi
+    fi
+    cp "$OUT/tmp.answers.json" "${outf%.json}.answers-used.json"
+  }
+  for p in autonomous reviewed strict; do printf 'preset: %s\n' "$p" > "$OUT/$p.brisk.yaml"; done
   for c in $CASES; do
-    answers "$c" > "$OUT/$c.answers.json"
-    answers "$c@project" > "$OUT/$c.project.answers.json"
     common=(assess --repo "$R" --base main --head "$c" --session "$OUT/$c.session.json")
-    "$BRISK" "${common[@]}" --answers "$OUT/$c.answers.json" --format json > "$OUT/$c.final.json"
-    "$BRISK" "${common[@]}" --answers "$OUT/$c.answers.json" --format text > "$OUT/$c.final.txt"
+    score "$OUT/$c.final.json" "$c" "$OUT/$c.host.json"
+    "$BRISK" "${common[@]}" --answers "$OUT/$c.final.answers-used.json" --format text > "$OUT/$c.final.txt"
     # The same answers under each preset, as a repo's base .brisk.yaml would set it.
     for p in autonomous reviewed strict; do
-      printf 'preset: %s\n' "$p" > "$OUT/$p.brisk.yaml"
-      "$BRISK" "${common[@]}" --answers "$OUT/$c.answers.json" --config "$OUT/$p.brisk.yaml" --format json > "$OUT/$c.$p.json"
+      score "$OUT/$c.$p.json" "$c" "$OUT/$c.host.json" --config "$OUT/$p.brisk.yaml"
     done
-    "$BRISK" "${common[@]}" --answers "$OUT/$c.project.answers.json" --config "$PROJECT" --format json > "$OUT/$c.project.json"
+    score "$OUT/$c.project.json" "$c@project" "$OUT/$c.project.host.json" --config "$PROJECT"
   done
+  rm -f "$OUT/tmp.answers.json"
+  if [ "$pending" = 1 ]; then
+    echo "Review questions added to $OUT/req.jsonl: answer them, then run PHASE=2 again." >&2
+    exit 4
+  fi
   python3 "$HERE/embed.py" "$OUT"
 fi
