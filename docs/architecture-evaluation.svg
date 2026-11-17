@@ -1,0 +1,113 @@
+<svg xmlns="http://www.w3.org/2000/svg"
+  width="1200" height="1070" viewBox="0 0 1200 1070"
+  role="img" aria-labelledby="title description">
+<title id="title">CI replays recorded answers through the same scoring core</title>
+<desc id="description">Live model access is an explicit recording step, not part of ordinary CI.</desc>
+<defs>
+  <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5"
+    markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+    <path d="M 0 0 L 10 5 L 0 10 z" fill="#526078"/>
+  </marker>
+  <marker id="blue-arrow" viewBox="0 0 10 10" refX="9" refY="5"
+    markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+    <path d="M 0 0 L 10 5 L 0 10 z" fill="#245bcb"/>
+  </marker>
+</defs>
+<rect width="1200" height="1070" fill="white"/>
+<g font-family="DejaVu Sans, sans-serif" fill="#17243b">
+<text x="40" y="48" font-size="25" fill="#17243b" font-weight="600" text-anchor="start">CI replays recorded answers through the same scoring core</text>
+<text x="40" y="79" font-size="15" fill="#526078" font-weight="400" text-anchor="start">Live model access is an explicit recording step, not part of ordinary CI.</text>
+<text x="40" y="108" font-size="12" fill="#526078" font-weight="400" text-anchor="start">Blue: deterministic replay     Dashed routes: explicit recording or calibration feedback</text>
+<rect x="40" y="145" width="520" height="128" rx="8" fill="white" stroke="#aab5c5" stroke-width="1"/>
+<text x="58" y="174" font-size="16" fill="#17243b" font-weight="600" text-anchor="start">Historical changes · offline evaluation</text>
+<text x="58" y="202" font-size="13" fill="#526078" font-weight="400" text-anchor="start">repo A + repo B · brisk-eval label / prepare</text>
+<text x="58" y="224" font-size="13" fill="#526078" font-weight="400" text-anchor="start">Reverts, fixes within 14 days, optional supplied CI failures</text>
+<text x="58" y="246" font-size="13" fill="#526078" font-weight="400" text-anchor="start">Noisy outcome labels, not expert ground truth</text>
+<rect x="640" y="145" width="520" height="128" rx="8" fill="white" stroke="#245bcb" stroke-width="1.7"/>
+<text x="658" y="174" font-size="16" fill="#17243b" font-weight="600" text-anchor="start">Fixtures + injection variants · CI</text>
+<text x="658" y="202" font-size="13" fill="#526078" font-weight="400" text-anchor="start">testdata/fixtures/ + testdata/injection/</text>
+<text x="658" y="224" font-size="13" fill="#526078" font-weight="400" text-anchor="start">Expected tiers and rule-floor assertions</text>
+<text x="658" y="246" font-size="13" fill="#526078" font-weight="400" text-anchor="start">Normal tests do not ask the live model</text>
+<rect x="340" y="335" width="520" height="105" rx="8" fill="white" stroke="#aab5c5" stroke-width="1"/>
+<text x="358" y="364" font-size="16" fill="#17243b" font-weight="600" text-anchor="start">Shared core · Engine.Prepare</text>
+<text x="358" y="392" font-size="13" fill="#526078" font-weight="400" text-anchor="start">Same diff collection, rules, context and language backends</text>
+<text x="358" y="414" font-size="13" fill="#526078" font-weight="400" text-anchor="start">Produces prepared evidence, state, typed questions and a key</text>
+<polyline points="300,273 300,300 490,300 490,335" fill="none" stroke="#526078" stroke-width="1.2" marker-end="url(#arrow)"/>
+<g paint-order="stroke" stroke="white" stroke-width="5">
+<text x="391" y="291" font-size="12" fill="#526078" font-weight="400" text-anchor="middle">prepare history</text>
+</g>
+<polyline points="900,273 900,300 710,300 710,335" fill="none" stroke="#245bcb" stroke-width="1.7" marker-end="url(#blue-arrow)"/>
+<g paint-order="stroke" stroke="white" stroke-width="5">
+<text x="805" y="291" font-size="12" fill="#245bcb" font-weight="400" text-anchor="middle">prepare fixtures</text>
+</g>
+<rect x="40" y="520" width="330" height="150" rx="8" fill="white" stroke="#aab5c5" stroke-width="1"/>
+<text x="58" y="549" font-size="16" fill="#17243b" font-weight="600" text-anchor="start">Explicit recording step</text>
+<text x="58" y="577" font-size="13" fill="#526078" font-weight="400" text-anchor="start">OpenRouter → Jev OR eval/ampdecide</text>
+<text x="58" y="599" font-size="13" fill="#526078" font-weight="400" text-anchor="start">Record new / changed requests</text>
+<text x="58" y="621" font-size="13" fill="#526078" font-weight="400" text-anchor="start">Manual refresh workflow uploads</text>
+<text x="58" y="643" font-size="13" fill="#526078" font-weight="400" text-anchor="start">answers for review and commit</text>
+<rect x="435" y="520" width="330" height="150" rx="8" fill="white" stroke="#245bcb" stroke-width="1.7"/>
+<text x="453" y="549" font-size="16" fill="#17243b" font-weight="600" text-anchor="start">Recorded answers · JSONL</text>
+<text x="453" y="577" font-size="13" fill="#526078" font-weight="400" text-anchor="start">Request key, exact model, typed answers</text>
+<text x="453" y="599" font-size="13" fill="#526078" font-weight="400" text-anchor="start">Fixtures: testdata/answers/*.jsonl</text>
+<text x="453" y="621" font-size="13" fill="#526078" font-weight="400" text-anchor="start">Historical answers: separate files</text>
+<text x="453" y="643" font-size="13" fill="#526078" font-weight="400" text-anchor="start">No credentials in recordings</text>
+<rect x="830" y="520" width="330" height="150" rx="8" fill="white" stroke="#245bcb" stroke-width="1.7"/>
+<text x="848" y="549" font-size="16" fill="#17243b" font-weight="600" text-anchor="start">Deterministic replay</text>
+<text x="848" y="577" font-size="13" fill="#526078" font-weight="400" text-anchor="start">Match request key to recorded answers</text>
+<text x="848" y="599" font-size="13" fill="#526078" font-weight="400" text-anchor="start">Missing fixture recording fails the test</text>
+<text x="848" y="621" font-size="13" fill="#526078" font-weight="400" text-anchor="start">No API key, network call or model cost</text>
+<text x="848" y="643" font-size="13" fill="#526078" font-weight="400" text-anchor="start">[WIP] key distinct from host protocol ID</text>
+<polyline points="400,440 400,480 205,480 205,520" fill="none" stroke="#526078" stroke-width="1.2" marker-end="url(#arrow)" stroke-dasharray="6 5"/>
+<g paint-order="stroke" stroke="white" stroke-width="5">
+<text x="258" y="468" font-size="12" fill="#526078" font-weight="400" text-anchor="middle">new / changed requests</text>
+</g>
+<polyline points="370,595 435,595" fill="none" stroke="#526078" stroke-width="1.2" marker-end="url(#arrow)" stroke-dasharray="6 5"/>
+<g paint-order="stroke" stroke="white" stroke-width="5">
+<text x="401" y="583" font-size="12" fill="#526078" font-weight="400" text-anchor="middle">save</text>
+</g>
+<polyline points="765,595 830,595" fill="none" stroke="#245bcb" stroke-width="1.7" marker-end="url(#blue-arrow)"/>
+<g paint-order="stroke" stroke="white" stroke-width="5">
+<text x="797" y="583" font-size="12" fill="#245bcb" font-weight="400" text-anchor="middle">load</text>
+</g>
+<polyline points="800,440 800,480 995,480 995,520" fill="none" stroke="#245bcb" stroke-width="1.7" marker-end="url(#blue-arrow)"/>
+<g paint-order="stroke" stroke="white" stroke-width="5">
+<text x="991" y="468" font-size="12" fill="#245bcb" font-weight="400" text-anchor="middle">key + prepared evidence</text>
+</g>
+<rect x="435" y="742" width="725" height="105" rx="8" fill="white" stroke="#245bcb" stroke-width="1.7"/>
+<text x="453" y="771" font-size="16" fill="#17243b" font-weight="600" text-anchor="start">Shared scoring logic · assess/ + calibration/</text>
+<text x="453" y="799" font-size="13" fill="#526078" font-weight="400" text-anchor="start">Prepared.Finish for fixtures; reused scoring functions for historical records</text>
+<text x="453" y="821" font-size="13" fill="#526078" font-weight="400" text-anchor="start">Model-version calibration + rule floor · same tiering contract as the CLI</text>
+<polyline points="995,670 995,742" fill="none" stroke="#245bcb" stroke-width="1.7" marker-end="url(#blue-arrow)"/>
+<g paint-order="stroke" stroke="white" stroke-width="5">
+<text x="1090" y="711" font-size="12" fill="#245bcb" font-weight="400" text-anchor="middle">recorded typed answers</text>
+</g>
+<rect x="40" y="742" width="330" height="105" rx="8" fill="white" stroke="#aab5c5" stroke-width="1"/>
+<text x="58" y="771" font-size="16" fill="#17243b" font-weight="600" text-anchor="start">Versioned calibration data</text>
+<text x="58" y="799" font-size="13" fill="#526078" font-weight="400" text-anchor="start">Fit on training data; review the change</text>
+<text x="58" y="821" font-size="13" fill="#526078" font-weight="400" text-anchor="start">Never a runtime self-update</text>
+<polyline points="370,794 435,794" fill="none" stroke="#526078" stroke-width="1.2" marker-end="url(#arrow)"/>
+<g paint-order="stroke" stroke="white" stroke-width="5">
+<text x="402" y="782" font-size="12" fill="#526078" font-weight="400" text-anchor="middle">data</text>
+</g>
+<rect x="435" y="905" width="330" height="95" rx="8" fill="white" stroke="#245bcb" stroke-width="1.7"/>
+<text x="453" y="934" font-size="16" fill="#17243b" font-weight="600" text-anchor="start">GitHub Actions · CI</text>
+<text x="453" y="962" font-size="13" fill="#526078" font-weight="400" text-anchor="start">Fixture replay, vet, tests, static builds</text>
+<text x="453" y="984" font-size="13" fill="#526078" font-weight="400" text-anchor="start">Amp plugin tests + TypeScript check</text>
+<rect x="830" y="905" width="330" height="95" rx="8" fill="white" stroke="#aab5c5" stroke-width="1"/>
+<text x="848" y="934" font-size="16" fill="#17243b" font-weight="600" text-anchor="start">Offline evaluation report</text>
+<text x="848" y="962" font-size="13" fill="#526078" font-weight="400" text-anchor="start">Held-out metrics + baselines, stability,</text>
+<text x="848" y="984" font-size="13" fill="#526078" font-weight="400" text-anchor="start">latency, cost · [WIP] per-preset results</text>
+<polyline points="600,847 600,905" fill="none" stroke="#245bcb" stroke-width="1.7" marker-end="url(#blue-arrow)"/>
+<g paint-order="stroke" stroke="white" stroke-width="5">
+<text x="648" y="885" font-size="12" fill="#245bcb" font-weight="400" text-anchor="middle">assertions</text>
+</g>
+<polyline points="995,847 995,905" fill="none" stroke="#526078" stroke-width="1.2" marker-end="url(#arrow)"/>
+<g paint-order="stroke" stroke="white" stroke-width="5">
+<text x="1074" y="885" font-size="12" fill="#526078" font-weight="400" text-anchor="middle">scores + labels</text>
+</g>
+<polyline points="830,957 800,957 800,1047 205,1047 205,847" fill="none" stroke="#526078" stroke-width="1.2" marker-end="url(#arrow)" stroke-dasharray="6 5"/>
+<g paint-order="stroke" stroke="white" stroke-width="5">
+<text x="464" y="1038" font-size="12" fill="#526078" font-weight="400" text-anchor="middle">fit feedback from training split only</text>
+</g>
+</g></svg>

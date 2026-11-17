@@ -1,0 +1,82 @@
+<svg xmlns="http://www.w3.org/2000/svg"
+  width="1200" height="735" viewBox="0 0 1200 735"
+  role="img" aria-labelledby="title description">
+<title id="title">Brisk rates the risk of a code change</title>
+<desc id="description">One independent core. Rules set a floor that the model cannot lower.</desc>
+<defs>
+  <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5"
+    markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+    <path d="M 0 0 L 10 5 L 0 10 z" fill="#526078"/>
+  </marker>
+  <marker id="blue-arrow" viewBox="0 0 10 10" refX="9" refY="5"
+    markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+    <path d="M 0 0 L 10 5 L 0 10 z" fill="#245bcb"/>
+  </marker>
+</defs>
+<rect width="1200" height="735" fill="white"/>
+<g font-family="DejaVu Sans, sans-serif" fill="#17243b">
+<text x="40" y="48" font-size="25" fill="#17243b" font-weight="600" text-anchor="start">Brisk rates the risk of a code change</text>
+<text x="40" y="79" font-size="15" fill="#526078" font-weight="400" text-anchor="start">One independent core. Rules set a floor that the model cannot lower.</text>
+<rect x="400" y="125" width="400" height="95" rx="8" fill="white" stroke="#aab5c5" stroke-width="1"/>
+<text x="418" y="154" font-size="16" fill="#17243b" font-weight="600" text-anchor="start">Harness adapters</text>
+<text x="418" y="182" font-size="13" fill="#526078" font-weight="400" text-anchor="start">Amp captures session context and shows results.</text>
+<text x="418" y="204" font-size="13" fill="#526078" font-weight="400" text-anchor="start">Other harnesses: interface-only</text>
+<rect x="40" y="295" width="300" height="145" rx="8" fill="white" stroke="#aab5c5" stroke-width="1"/>
+<text x="58" y="324" font-size="16" fill="#17243b" font-weight="600" text-anchor="start">Inputs · untrusted</text>
+<text x="58" y="352" font-size="13" fill="#526078" font-weight="400" text-anchor="start">Diff against a base commit</text>
+<text x="58" y="374" font-size="13" fill="#526078" font-weight="400" text-anchor="start">Optional session record</text>
+<text x="58" y="396" font-size="13" fill="#526078" font-weight="400" text-anchor="start">Code and transcripts are evidence,</text>
+<text x="58" y="418" font-size="13" fill="#526078" font-weight="400" text-anchor="start">not instructions or policy.</text>
+<rect x="400" y="295" width="400" height="145" rx="8" fill="white" stroke="#245bcb" stroke-width="1.7"/>
+<text x="418" y="324" font-size="16" fill="#17243b" font-weight="600" text-anchor="start">Brisk core library + CLI</text>
+<text x="418" y="352" font-size="13" fill="#526078" font-weight="400" text-anchor="start">Combines rules, code analysis and model answers</text>
+<text x="418" y="374" font-size="13" fill="#526078" font-weight="400" text-anchor="start">Produces one evidence-backed assessment</text>
+<text x="418" y="396" font-size="13" fill="#526078" font-weight="400" text-anchor="start">Model can raise risk, never lower the rule floor.</text>
+<text x="418" y="418" font-size="13" fill="#526078" font-weight="400" text-anchor="start">Works without a harness or a model.</text>
+<rect x="860" y="295" width="300" height="145" rx="8" fill="white" stroke="#245bcb" stroke-width="1.7"/>
+<text x="878" y="324" font-size="16" fill="#17243b" font-weight="600" text-anchor="start">Assessment</text>
+<text x="878" y="352" font-size="13" fill="#526078" font-weight="400" text-anchor="start">Low / Medium / High</text>
+<text x="878" y="374" font-size="13" fill="#526078" font-weight="400" text-anchor="start">Reasons, evidence and next action</text>
+<text x="878" y="396" font-size="13" fill="#526078" font-weight="400" text-anchor="start">[WIP] Agent review recommended</text>
+<text x="878" y="418" font-size="13" fill="#526078" font-weight="400" text-anchor="start">Shown in the harness or CLI</text>
+<polyline points="600,220 600,295" fill="none" stroke="#526078" stroke-width="1.2" marker-end="url(#arrow)"/>
+<g paint-order="stroke" stroke="white" stroke-width="5">
+<text x="700" y="263" font-size="12" fill="#526078" font-weight="400" text-anchor="middle">calls CLI + supplies session</text>
+</g>
+<polyline points="340,365 400,365" fill="none" stroke="#526078" stroke-width="1.2" marker-end="url(#arrow)"/>
+<g paint-order="stroke" stroke="white" stroke-width="5">
+<text x="370" y="352" font-size="12" fill="#526078" font-weight="400" text-anchor="middle">input</text>
+</g>
+<polyline points="800,365 860,365" fill="none" stroke="#245bcb" stroke-width="1.7" marker-end="url(#blue-arrow)"/>
+<g paint-order="stroke" stroke="white" stroke-width="5">
+<text x="830" y="352" font-size="12" fill="#245bcb" font-weight="400" text-anchor="middle">result</text>
+</g>
+<rect x="40" y="555" width="330" height="120" rx="8" fill="white" stroke="#aab5c5" stroke-width="1"/>
+<text x="58" y="584" font-size="16" fill="#17243b" font-weight="600" text-anchor="start">Language analysis</text>
+<text x="58" y="612" font-size="13" fill="#526078" font-weight="400" text-anchor="start">Go and TypeScript / React</text>
+<text x="58" y="634" font-size="13" fill="#526078" font-weight="400" text-anchor="start">Tree-sitter WASM on wazero</text>
+<text x="58" y="656" font-size="13" fill="#526078" font-weight="400" text-anchor="start">Reports structural changes</text>
+<rect x="435" y="555" width="330" height="120" rx="8" fill="white" stroke="#aab5c5" stroke-width="1"/>
+<text x="453" y="584" font-size="16" fill="#17243b" font-weight="600" text-anchor="start">Project context + policy</text>
+<text x="453" y="612" font-size="13" fill="#526078" font-weight="400" text-anchor="start">Git history and sensitive paths</text>
+<text x="453" y="634" font-size="13" fill="#526078" font-weight="400" text-anchor="start">Config from the base commit</text>
+<text x="453" y="656" font-size="13" fill="#526078" font-weight="400" text-anchor="start">[WIP] Named policy presets</text>
+<rect x="830" y="555" width="330" height="120" rx="8" fill="white" stroke="#aab5c5" stroke-width="1"/>
+<text x="848" y="584" font-size="16" fill="#17243b" font-weight="600" text-anchor="start">Classifier backends</text>
+<text x="848" y="612" font-size="13" fill="#526078" font-weight="400" text-anchor="start">Jev through OpenRouter</text>
+<text x="848" y="634" font-size="13" fill="#526078" font-weight="400" text-anchor="start">Host: harness answers the questions</text>
+<text x="848" y="656" font-size="13" fill="#526078" font-weight="400" text-anchor="start">Rules-only: no model</text>
+<polyline points="205,555 205,495 480,495 480,440" fill="none" stroke="#526078" stroke-width="1.2" marker-end="url(#arrow)"/>
+<g paint-order="stroke" stroke="white" stroke-width="5">
+<text x="298" y="485" font-size="12" fill="#526078" font-weight="400" text-anchor="middle">findings</text>
+</g>
+<polyline points="600,555 600,440" fill="none" stroke="#526078" stroke-width="1.2" marker-end="url(#arrow)"/>
+<g paint-order="stroke" stroke="white" stroke-width="5">
+<text x="634" y="522" font-size="12" fill="#526078" font-weight="400" text-anchor="middle">context</text>
+</g>
+<polyline points="995,555 995,495 720,495 720,440" fill="none" stroke="#526078" stroke-width="1.2" marker-end="url(#arrow)"/>
+<g paint-order="stroke" stroke="white" stroke-width="5">
+<text x="911" y="485" font-size="12" fill="#526078" font-weight="400" text-anchor="middle">answers</text>
+</g>
+<text x="40" y="715" font-size="12" fill="#526078" font-weight="400" text-anchor="start">MVP components shown · Additional implementations are interface-only · [WIP] = active extension</text>
+</g></svg>
