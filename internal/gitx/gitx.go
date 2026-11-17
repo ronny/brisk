@@ -8,6 +8,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -171,12 +172,12 @@ func (r *Repo) Changes(ctx context.Context, base, head string) (*risk.ChangeSet,
 		if _, err := work.Run(ctx, "-c", "core.splitIndex=false", "add", "-A", "--", "."); err != nil {
 			return nil, err
 		}
-		hidden, err := work.hiddenByChange(ctx, baseID)
+		hidden, code, err := work.hiddenByChange(ctx, baseID)
 		if err != nil {
 			return nil, err
 		}
-		if len(hidden) > 0 {
-			args := append([]string{"--literal-pathspecs", "-c", "core.splitIndex=false", "add", "-f", "--"}, hidden...)
+		if len(code) > 0 {
+			args := append([]string{"--literal-pathspecs", "-c", "core.splitIndex=false", "add", "-f", "--"}, code...)
 			if _, err := work.Run(ctx, args...); err != nil {
 				return nil, err
 			}
@@ -201,92 +202,209 @@ func (r *Repo) Changes(ctx context.Context, base, head string) (*risk.ChangeSet,
 	return cs, nil
 }
 
-// MaxHidden caps how many ignored code files hiddenByChange returns.
+// MaxHidden caps how many hidden paths hiddenByChange reports and how
+// many code files it adds.
 const MaxHidden = 50
 
-// hiddenByChange returns untracked code files that are ignored only by a
-// line the change adds to a .gitignore, so a change cannot hide new code
-// from its own assessment by ignoring it. w must use the scratch index
-// that already holds the change.
-func (w *Repo) hiddenByChange(ctx context.Context, base string) ([]string, error) {
-	out, err := w.Run(ctx, "diff", "--cached", "--name-only", "--no-renames", "-z", base)
+// maxHiddenVisits caps the directory entries hiddenByChange walks.
+const maxHiddenVisits = 10000
+
+// hiddenByChange finds untracked files that the working tree's ignore
+// rules hide but the base commit's rules do not, so a change cannot hide
+// new code from its own assessment with a .gitignore it adds, edits, or
+// that ignores itself. It returns the hidden paths (a directory, ending in
+// "/", when the walk stopped early) and the code files among them to
+// assess as added files. Directories that hold dependencies or build
+// output are expected to be ignored and are left out. w must use the
+// scratch index that already holds the change.
+func (w *Repo) hiddenByChange(ctx context.Context, base string) (hidden, code []string, err error) {
+	out, err := w.Run(ctx, "ls-files", "-z", "-o", "-i", "--exclude-standard", "--directory", "--no-empty-directory")
+	if err != nil || len(out) == 0 {
+		return nil, nil, err
+	}
+	var entries []string
+	for _, e := range strings.Split(strings.TrimSuffix(string(out), "\x00"), "\x00") {
+		if !expectedIgnored(e) {
+			entries = append(entries, e)
+		}
+	}
+	if len(entries) == 0 {
+		return nil, nil, nil
+	}
+	baseRules, cleanup, err := w.baseIgnoreRules(ctx, base)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	changed := map[string]bool{}
-	for _, p := range strings.Split(string(out), "\x00") {
-		if path.Base(p) == ".gitignore" {
-			changed[p] = true
-		}
+	defer cleanup()
+	ignoredAtBase, err := checkIgnore(ctx, baseRules, entries)
+	if err != nil {
+		return nil, nil, err
 	}
-	if len(changed) == 0 {
-		return nil, nil
-	}
-	ignored, err := w.Run(ctx, "ls-files", "-z", "-o", "-i", "--exclude-standard", "--directory")
-	if err != nil || len(ignored) == 0 {
-		return nil, err
-	}
-	// check-ignore exits 1 when nothing matches.
-	m, _ := w.RunInput(ctx, ignored, "check-ignore", "-v", "-z", "--stdin")
-	baseLines := map[string]map[string]bool{}
-	var hidden []string
-	f := strings.Split(string(m), "\x00")
-	for i := 0; i+3 < len(f) && len(hidden) < MaxHidden; i += 4 {
-		source, pattern, p := f[i], f[i+2], f[i+3]
-		if !changed[source] || strings.HasPrefix(pattern, "!") {
+	var files []string
+	budget := maxHiddenVisits
+	for _, e := range entries {
+		if ignoredAtBase[e] {
 			continue
 		}
-		lines, ok := baseLines[source]
-		if !ok {
-			lines = map[string]bool{}
-			b, _ := w.Run(ctx, "show", base+":"+source) // absent at base: every line is new
-			for _, l := range strings.Split(string(b), "\n") {
-				lines[strings.TrimSpace(l)] = true
-			}
-			baseLines[source] = lines
-		}
-		if lines[pattern] {
+		if !strings.HasSuffix(e, "/") {
+			files = append(files, e)
 			continue
 		}
-		hidden = append(hidden, codeFiles(w.Root, p, MaxHidden-len(hidden))...)
+		found, complete := walkFiles(w.Root, e, &budget)
+		files = append(files, found...)
+		if !complete {
+			hidden = append(hidden, e)
+		}
 	}
-	return hidden, nil
+	// A file inside a newly hidden directory may already be ignored at
+	// base by a rule of its own, such as *.log.
+	ignoredAtBase, err = checkIgnore(ctx, baseRules, files)
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, f := range files {
+		if ignoredAtBase[f] {
+			continue
+		}
+		if len(hidden) < MaxHidden {
+			hidden = append(hidden, f)
+		}
+		if len(code) < MaxHidden && isCode(filepath.Join(w.Root, filepath.FromSlash(f))) {
+			code = append(code, f)
+		}
+	}
+	return hidden, code, nil
 }
 
-var codeExt = map[string]bool{".go": true, ".ts": true, ".tsx": true, ".js": true, ".jsx": true, ".mjs": true, ".cjs": true,
-	".py": true, ".rb": true, ".java": true, ".kt": true, ".rs": true, ".php": true, ".cs": true, ".swift": true,
-	".c": true, ".h": true, ".cc": true, ".cpp": true, ".sql": true, ".sh": true, ".proto": true}
+// baseIgnoreRules makes a scratch repository whose ignore rules are the
+// base commit's .gitignore files plus the real info/exclude, so git's own
+// matcher can say what the base would have ignored.
+func (w *Repo) baseIgnoreRules(ctx context.Context, base string) (*Repo, func(), error) {
+	tmp, err := os.MkdirTemp("", "brisk-ignore-*")
+	if err != nil {
+		return nil, nil, err
+	}
+	cleanup := func() { os.RemoveAll(tmp) }
+	fail := func(err error) (*Repo, func(), error) { cleanup(); return nil, nil, err }
+	rules := &Repo{Root: tmp}
+	if _, err := rules.run(ctx, nil, "init", "-q"); err != nil {
+		return fail(err)
+	}
+	list, err := w.Run(ctx, "ls-tree", "-r", "-z", "--name-only", base)
+	if err != nil {
+		return fail(err)
+	}
+	for _, p := range strings.Split(strings.TrimSuffix(string(list), "\x00"), "\x00") {
+		if path.Base(p) != ".gitignore" {
+			continue
+		}
+		b, err := w.Run(ctx, "show", base+":"+p)
+		if err != nil {
+			return fail(err)
+		}
+		dst := filepath.Join(tmp, filepath.FromSlash(p))
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+			return fail(err)
+		}
+		if err := os.WriteFile(dst, b, 0o644); err != nil {
+			return fail(err)
+		}
+	}
+	if p, err := w.Run(ctx, "rev-parse", "--path-format=absolute", "--git-path", "info/exclude"); err == nil {
+		if b, err := os.ReadFile(strings.TrimSpace(string(p))); err == nil {
+			if err := os.WriteFile(filepath.Join(tmp, ".git", "info", "exclude"), b, 0o644); err != nil {
+				return fail(err)
+			}
+		}
+	}
+	return rules, cleanup, nil
+}
 
-// codeFiles returns up to max code files at p, a file or a directory
-// ending in "/", relative to root. It skips dependency directories and
-// files larger than MaxContent, and stops after visiting 10,000 entries.
-func codeFiles(root, p string, max int) []string {
+// checkIgnore returns which of paths r's ignore rules ignore. The paths
+// need not exist; a trailing "/" marks a directory.
+func checkIgnore(ctx context.Context, r *Repo, paths []string) (map[string]bool, error) {
+	set := map[string]bool{}
+	if len(paths) == 0 {
+		return set, nil
+	}
+	out, err := r.RunInput(ctx, []byte(strings.Join(paths, "\x00")+"\x00"), "check-ignore", "--no-index", "-z", "--stdin")
+	var exit *exec.ExitError
+	if err != nil && !(errors.As(err, &exit) && exit.ExitCode() == 1) { // 1: none ignored
+		return nil, err
+	}
+	for _, p := range strings.Split(string(out), "\x00") {
+		if p != "" {
+			set[p] = true
+		}
+	}
+	return set, nil
+}
+
+// expectedIgnored reports whether p is a directory of dependencies or build
+// output, which projects routinely ignore.
+func expectedIgnored(p string) bool {
+	if !strings.HasSuffix(p, "/") {
+		return false
+	}
+	switch path.Base(p) {
+	case "node_modules", "vendor", "dist", "build", "out", "target", "coverage", ".next", ".nuxt", ".turbo", ".cache",
+		"env", "venv", ".venv", "__pycache__", ".pytest_cache", ".mypy_cache", "tmp", ".tmp":
+		return true
+	}
+	return false
+}
+
+var codeExt = map[string]bool{".go": true, ".ts": true, ".tsx": true, ".mts": true, ".cts": true, ".js": true, ".jsx": true, ".mjs": true, ".cjs": true,
+	".vue": true, ".svelte": true, ".py": true, ".rb": true, ".java": true, ".kt": true, ".scala": true, ".rs": true, ".php": true, ".cs": true,
+	".swift": true, ".ex": true, ".exs": true, ".lua": true, ".c": true, ".h": true, ".cc": true, ".cpp": true, ".sql": true, ".sh": true,
+	".proto": true, ".tf": true, ".yml": true, ".yaml": true}
+
+// isCode reports whether the file at abs is source worth assessing: a
+// known extension, not a minified bundle or source map, at most MaxContent.
+func isCode(abs string) bool {
+	b := strings.ToLower(filepath.Base(abs))
+	if strings.HasSuffix(b, ".min.js") || strings.HasSuffix(b, ".map") {
+		return false
+	}
+	if !codeExt[filepath.Ext(b)] && b != "dockerfile" && b != "makefile" {
+		return false
+	}
+	info, err := os.Lstat(abs)
+	return err == nil && info.Mode().IsRegular() && info.Size() <= MaxContent
+}
+
+// walkFiles lists regular files under dir, relative to root, skipping
+// nested .git and expected-ignored directories. It spends *budget visits
+// and reports whether it saw the whole directory.
+func walkFiles(root, dir string, budget *int) ([]string, bool) {
 	var out []string
-	visited := 0
-	filepath.WalkDir(filepath.Join(root, filepath.FromSlash(p)), func(abs string, d os.DirEntry, err error) error {
-		visited++
-		if err != nil || len(out) >= max || visited > 10000 {
+	complete := true
+	filepath.WalkDir(filepath.Join(root, filepath.FromSlash(dir)), func(abs string, d os.DirEntry, err error) error {
+		if *budget <= 0 {
+			complete = false
 			return filepath.SkipAll
 		}
+		*budget--
+		if err != nil {
+			return nil
+		}
+		rel, rerr := filepath.Rel(root, abs)
+		if rerr != nil {
+			return nil
+		}
+		rel = filepath.ToSlash(rel)
 		if d.IsDir() {
-			switch d.Name() {
-			case ".git", "node_modules", ".venv", "venv", "__pycache__":
+			if d.Name() == ".git" || rel+"/" != dir && expectedIgnored(rel+"/") {
 				return filepath.SkipDir
 			}
 			return nil
 		}
-		if !d.Type().IsRegular() || !codeExt[strings.ToLower(filepath.Ext(abs))] {
-			return nil
-		}
-		if info, err := d.Info(); err != nil || info.Size() > MaxContent {
-			return nil
-		}
-		if rel, err := filepath.Rel(root, abs); err == nil {
-			out = append(out, filepath.ToSlash(rel))
+		if d.Type().IsRegular() {
+			out = append(out, rel)
 		}
 		return nil
 	})
-	return out
+	return out, complete
 }
 
 func (r *Repo) tempIndex(ctx context.Context) (string, func(), error) {

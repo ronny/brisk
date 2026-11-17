@@ -151,7 +151,7 @@ func IsCredentialFile(p string) bool { return credentialFiles(p) }
 // are data, not code, and are always skipped.
 func IsGeneratedChange(fc risk.FileChange) bool {
 	if isLockfile(fc.Path) {
-		return true
+		return fc.OldPath == "" || isLockfile(fc.OldPath)
 	}
 	old := fc.Path
 	if fc.OldPath != "" {

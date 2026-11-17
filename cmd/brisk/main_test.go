@@ -385,13 +385,24 @@ func TestRenameIntoGeneratedPathIsStillAnalysed(t *testing.T) {
 	write(t, dir, "internal/auth/check.go", "package auth\n\nfunc CanAccess(ok bool) bool {\n\treturn ok\n}\n")
 	git(t, dir, "add", "-A")
 	git(t, dir, "commit", "-q", "-m", "check")
-	git(t, dir, "mv", "internal/auth/check.go", "internal/auth/check_gen.go")
-	write(t, dir, "internal/auth/check_gen.go", "package auth\n\nfunc CanAccess(ok bool) bool {\n\treturn true\n}\n")
+	for _, name := range []string{"check_gen.go", "go.sum"} {
+		t.Run(name, func(t *testing.T) {
+			git(t, dir, "reset", "-q", "--hard")
+			git(t, dir, "mv", "internal/auth/check.go", "internal/auth/"+name)
+			write(t, dir, "internal/auth/"+name, "package auth\n\nfunc CanAccess(ok bool) bool {\n\treturn true\n}\n")
+			checkRenamed(t, dir, name == "check_gen.go")
+		})
+	}
+}
 
+// checkRenamed checks the rename is analysed; a .go name also gets the
+// Go backend's finding.
+func checkRenamed(t *testing.T, dir string, goFile bool) {
+	t.Helper()
 	a := assessJSON(t, "--repo", dir, "--base", "HEAD")
 	hits := a.Provenance.RuleHits
-	if a.Floor != risk.High || !slices.Contains(hits, "auth") || !slices.Contains(hits, "lang:auth_logic_changed") {
-		t.Fatalf("floor %s hits %v, want high with auth and lang:auth_logic_changed", a.Floor, hits)
+	if !slices.Contains(hits, "auth") || goFile && (a.Floor != risk.High || !slices.Contains(hits, "lang:auth_logic_changed")) {
+		t.Fatalf("floor %s hits %v, want auth, and high with lang:auth_logic_changed for a .go name", a.Floor, hits)
 	}
 	code, out, _ := runCLI(t, "assess", "--repo", dir, "--base", "HEAD", "--backend", "host", "--format", "json")
 	if code != 0 || !strings.Contains(out, "return true") {
@@ -446,5 +457,68 @@ func TestGitignoreAddedByChangeCannotHideCode(t *testing.T) {
 	}
 	if st := git(t, dir, "status", "--porcelain", "--ignored"); !strings.Contains(st, "!! internal/auth/zz.go") {
 		t.Fatalf("the real index must be untouched:\n%s", st)
+	}
+}
+
+// Every way the review found for a change to hide new code with ignore
+// rules, and the ordinary ignore edits that must stay quiet. Hidden is
+// judged by git's own matcher against the base commit's rules.
+func TestIgnoreRulesCannotHideCode(t *testing.T) {
+	bypass := "package auth\n\nfunc init() { bypass = func() bool { return true } }\n"
+	cases := []struct {
+		name       string
+		base       string // root .gitignore at base
+		setup      func(t *testing.T, dir string)
+		wantHidden bool
+	}{
+		{"self-ignoring nested .gitignore", "", func(t *testing.T, dir string) {
+			write(t, dir, "internal/auth/zz.go", bypass)
+			write(t, dir, "internal/auth/.gitignore", "*\n")
+		}, true},
+		{"removed negation", "internal/auth/*.go\n!internal/auth/*.go\n", func(t *testing.T, dir string) {
+			write(t, dir, "internal/auth/zz.go", bypass)
+			write(t, dir, ".gitignore", "internal/auth/*.go\n")
+		}, true},
+		{"pattern differing only by leading space", " zz.go\n", func(t *testing.T, dir string) {
+			write(t, dir, "internal/auth/zz.go", bypass)
+			write(t, dir, ".gitignore", " zz.go\nzz.go\n")
+		}, true},
+		{"many harmless files first", "", func(t *testing.T, dir string) {
+			for i := range 60 {
+				write(t, dir, fmt.Sprintf("internal/auth/a%02d.go", i), "package auth\n")
+			}
+			write(t, dir, "internal/auth/zz.go", bypass)
+			write(t, dir, ".gitignore", "internal/auth/\n")
+		}, true},
+		{"ignored by base already", "*.go\n", func(t *testing.T, dir string) {
+			write(t, dir, "internal/auth/zz.go", bypass)
+			write(t, dir, ".gitignore", "*.go\n# note\n")
+		}, false},
+		{"build output and a virtualenv", "", func(t *testing.T, dir string) {
+			write(t, dir, "web/dist/app.min.js", "var a=1\n")
+			write(t, dir, "web/dist/chunk.js", "export const b = 2\n")
+			write(t, dir, "env/lib/site.py", "import os\n")
+			write(t, dir, "web/.gitignore", "dist/\n")
+			write(t, dir, ".gitignore", "env/\n")
+		}, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			dir := newRepo(t)
+			if c.base != "" {
+				write(t, dir, ".gitignore", c.base)
+				git(t, dir, "add", "-A")
+				git(t, dir, "commit", "-q", "-m", "ignore")
+			}
+			c.setup(t, dir)
+			a := assessJSON(t, "--repo", dir, "--base", "HEAD")
+			hidden := slices.Contains(a.Provenance.RuleHits, "gitignore_hides_code")
+			if hidden != c.wantHidden {
+				t.Fatalf("gitignore_hides_code %v, want %v; floor %s hits %v", hidden, c.wantHidden, a.Floor, a.Provenance.RuleHits)
+			}
+			if c.wantHidden && a.Floor < risk.Medium {
+				t.Fatalf("floor %s, want at least medium", a.Floor)
+			}
+		})
 	}
 }
