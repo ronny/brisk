@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 
 	"github.com/ronny/brisk/assess"
@@ -120,5 +121,101 @@ func TestHostReviewIgnoredWhenNotAsked(t *testing.T) {
 	}}
 	if ans, errText, usage := h.ReviewResult(); ans != nil || errText != "" || usage != nil {
 		t.Fatalf("got %v %q %v, want nothing", ans, errText, usage)
+	}
+}
+
+// prepare commits yaml as the base .brisk.yaml, writes files as the change,
+// and prepares it.
+func prepare(t *testing.T, yaml string, files map[string]string) *assess.Prepared {
+	t.Helper()
+	ctx := context.Background()
+	dir := newRepo(t)
+	if yaml != "" {
+		write(t, dir, ".brisk.yaml", yaml)
+		git(t, dir, "add", "-A")
+		git(t, dir, "commit", "-q", "-m", "policy")
+	}
+	for path, content := range files {
+		write(t, dir, path, content)
+	}
+	repo, err := gitx.Open(ctx, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := (&assess.Engine{Repo: repo, Lang: languageBackends(), Context: &gitctx.Provider{}}).Prepare(ctx, assess.Input{Base: "HEAD"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+func planIDs(a risk.Assessment) []string {
+	var s []string
+	for _, x := range a.AgentReview.Plan {
+		s = append(s, x.ID)
+	}
+	return s
+}
+
+// An area Jev did not score, such as the generic one a fired project
+// question adds, ranks after the areas Jev scored.
+func TestUnscoredAreaRanksAfterScored(t *testing.T) {
+	p := prepare(t, `content_rules:
+  - id: sharing
+    paths: ["docs/**"]
+    pattern: 'Visible'
+    floor: medium
+    reason: Sharing rule.
+review_checks:
+  sharing:
+    area: Document sharing
+    checks: [Confirm drafts stay hidden.]
+questions:
+  - id: shares_drafts
+    text: Does this change make draft documents visible to others?
+    raise_to: medium
+`, map[string]string{"docs/share.go": "package docs\n\nvar Visible = true\n"})
+	a := p.Answer(context.Background(), &stubBackend{v: 0.95})
+	ids := planIDs(a)
+	i, j := slices.Index(ids, "config_sharing"), slices.Index(ids, "project_rule")
+	if a.Provenance.ReviewPlan.Status != "tailored" || i < 0 || j < 0 || i > j {
+		t.Fatalf("plan %v status %s; want the scored config_sharing before the unscored project_rule", ids, a.Provenance.ReviewPlan.Status)
+	}
+}
+
+// A review recommended by an answer alone, below every override, still
+// gets the area for that answer.
+func TestAnswerRecommendedReviewHasAPlan(t *testing.T) {
+	p := prepare(t, "", map[string]string{"internal/store/users.go": "package store\n\nfunc Users() { /* all users */ }\n"})
+	a := p.Answer(context.Background(), &stubBackend{v: 0.6})
+	if !a.AgentReview.Recommended || !slices.Contains(planIDs(a), "access_checks") {
+		t.Fatalf("recommended %v reason %q plan %v; want access_checks", a.AgentReview.Recommended, a.AgentReview.Reason, planIDs(a))
+	}
+	for _, x := range a.AgentReview.Plan {
+		if x.Required {
+			t.Fatalf("area %s from a sub-override answer must not be required", x.ID)
+		}
+	}
+}
+
+// Within required areas, an unscored one from a High model override leads
+// a required area Jev scored.
+func TestOverrideAreaLeadsRequired(t *testing.T) {
+	p := prepare(t, `content_rules:
+  - id: sharing
+    paths: ["docs/**"]
+    pattern: 'Visible'
+    floor: high
+    reason: Sharing rule.
+review_checks:
+  sharing:
+    area: Document sharing
+    checks: [Confirm drafts stay hidden.]
+`, map[string]string{"docs/share.go": "package docs\n\nvar Visible = true\n"})
+	a := p.Answer(context.Background(), &stubBackend{v: 0.95})
+	ids := planIDs(a)
+	i, j := slices.Index(ids, "access_checks"), slices.Index(ids, "config_sharing")
+	if a.Provenance.ReviewPlan.Status != "tailored" || i < 0 || j < 0 || i > j {
+		t.Fatalf("plan %v; want access_checks (High override) before the scored config_sharing", ids)
 	}
 }

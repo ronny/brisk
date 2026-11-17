@@ -58,6 +58,22 @@ func (p Policy) questionText(id, text string, answers map[string]risk.Answer) st
 	return text
 }
 
+// ReviewTriggers returns the questions whose answers meet an agent_review
+// condition (a yes/no minimum, or min_uncertainty), sorted.
+func (p Policy) ReviewTriggers(answers map[string]risk.Answer) []string {
+	var out []string
+	for q, min := range p.Review.Questions {
+		if a := answers[q]; a.Noul != nil && *a.Noul >= min {
+			out = append(out, q)
+		}
+	}
+	if a := answers["uncertainty"]; p.Review.MinUncertainty > 0 && a.Score != nil && *a.Score >= p.Review.MinUncertainty {
+		out = append(out, "uncertainty")
+	}
+	sort.Strings(out)
+	return out
+}
+
 // TailorPlan says when to ask the model to score the review plan;
 // "recommended" unless the config chose otherwise.
 func (p Policy) TailorPlan() string {

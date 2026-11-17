@@ -470,7 +470,7 @@ func (p *Prepared) Finish(backend string, resp *risk.Response, degraded string) 
 	if resp != nil {
 		review = p.ReviewAnswers
 	}
-	a.AgentReview.Plan, a.Provenance.ReviewPlan = p.buildPlan(firedIDs, firedTier, review)
+	a.AgentReview.Plan, a.Provenance.ReviewPlan = p.buildPlan(firedIDs, firedTier, a.Provenance.Answers, review)
 	if rp := a.Provenance.ReviewPlan; rp != nil && !rp.Tailored {
 		switch {
 		case resp == nil:

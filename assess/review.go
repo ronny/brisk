@@ -66,11 +66,14 @@ var reviewCatalog = map[string]reviewArea{
 	"risk_policy": {"Risk policy", []string{
 		"Confirm the change to brisk's policy is intended and agreed by the team.",
 	}},
+	"weak_verification": {"Untested behaviour", []string{
+		"Find the behaviour the change alters that no test covers, and add or run a test for it.",
+	}},
 	"verification": {"Verification", []string{
 		"Run the checks that failed in the session and confirm they pass.",
 	}},
 	"project_rule": {"Project rule", []string{
-		"Check the change against the project rule that fired; its reason is in the assessment.",
+		"Check the change against the project rule or question that flagged it, by its id in the assessment's provenance.",
 	}},
 }
 
@@ -93,6 +96,7 @@ var reviewAreaFor = map[string]string{
 	"gitignore_hides_code":     "hidden_code", "nested_repo": "hidden_code", "generated_without_source": "hidden_code", "generated_hand_edited": "hidden_code",
 	"brisk_config":                "risk_policy",
 	"session:verification_failed": "verification",
+	"uncertainty":                 "weak_verification",
 }
 
 // maxReviewQuestions caps the areas Jev scores; the rest stay unscored.
@@ -206,7 +210,11 @@ func checkTexts(a risk.ReviewArea) []string {
 // buildPlan returns the review plan and its provenance. fired are the
 // model overrides that raised the tier; they add areas Jev did not score.
 // review holds Jev's answers to the review questions, or nil.
-func (p *Prepared) buildPlan(fired []string, firedTier map[string]risk.Tier, review map[string]risk.Answer) ([]risk.ReviewArea, *risk.ReviewPlanProvenance) {
+//
+// answers are the main answers, or nil: an answer that meets an
+// agent_review condition adds its area too, so a review recommended by an
+// answer alone still has somewhere to look.
+func (p *Prepared) buildPlan(fired []string, firedTier map[string]risk.Tier, answers, review map[string]risk.Answer) ([]risk.ReviewArea, *risk.ReviewPlanProvenance) {
 	areas := p.planCandidates()
 	idx := map[string]int{}
 	for i, a := range areas {
@@ -215,6 +223,9 @@ func (p *Prepared) buildPlan(fired []string, firedTier map[string]risk.Tier, rev
 	asked := len(p.ReviewQuestions)
 	for _, q := range fired {
 		p.addArea(&areas, idx, q, firedTier[q], nil)
+	}
+	for _, q := range p.Policy.ReviewTriggers(answers) {
+		p.addArea(&areas, idx, q, risk.Low, nil)
 	}
 	prov := &risk.ReviewPlanProvenance{Scores: map[string]float64{}, Dropped: []string{}}
 	if asked > 0 && review != nil {
@@ -251,19 +262,25 @@ func (p *Prepared) buildPlan(fired []string, firedTier map[string]risk.Tier, rev
 		}
 		kept = append(kept, a)
 	}
-	// Required areas first; then by Jev's score. An unscored area (beyond
-	// the cap, or added by a model override) is treated as fully relevant.
-	score := func(a risk.ReviewArea) float64 {
-		if a.Score == nil {
-			return 3
-		}
-		return *a.Score
-	}
+	// Required areas first, led by unscored ones from High overrides; then
+	// areas Jev scored, by score; then the unscored ones (beyond the cap,
+	// or added from the answers), which are never dropped but must not
+	// outrank what Jev judged relevant.
 	sort.SliceStable(kept, func(i, j int) bool {
-		if kept[i].Required != kept[j].Required {
-			return kept[i].Required
+		a, b := kept[i], kept[j]
+		switch {
+		case a.Required != b.Required:
+			return a.Required
+		case a.Required && (a.Score == nil) != (b.Score == nil):
+			// A required area left unscored came from a High override,
+			// which outranks any score.
+			return a.Score == nil
+		case (a.Score == nil) != (b.Score == nil):
+			return a.Score != nil
+		case a.Score != nil:
+			return *a.Score > *b.Score
 		}
-		return score(kept[i]) > score(kept[j])
+		return false
 	})
 	return kept, prov
 }
