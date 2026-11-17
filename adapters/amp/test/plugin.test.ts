@@ -239,7 +239,7 @@ describe('session', () => {
 describe('settings', () => {
 	const root = '/work/repo'
 	test('reads only amp.brisk keys and resolves the backend', () => {
-		expect(settingsFrom({}, root, {})).toEqual({ bin: 'brisk', mode: 'amp', base: undefined, preset: 'reviewed', confirmShip: false, agentReview: 'suggest' })
+		expect(settingsFrom({}, root, {})).toEqual({ bin: 'brisk', mode: 'amp', base: undefined, preset: 'reviewed', confirmShip: false, agentReview: 'once-before-ship' })
 		expect(settingsFrom({}, root, { OPENROUTER_API_KEY: 'k' }).mode).toBe('binary')
 		expect(settingsFrom({ 'amp.brisk.backend': 'rules-only', 'amp.brisk.base': 'origin/dev' }, root, {})).toMatchObject({ mode: 'rules-only', base: 'origin/dev' })
 	})
@@ -278,14 +278,19 @@ describe('settings', () => {
 		expect(get({ 'amp.brisk.preset': 'autonomous' })).toMatchObject({ preset: 'autonomous', agentReview: 'after-turn', confirmShip: false })
 		expect(get({ 'amp.brisk.preset': 'strict' })).toMatchObject({ agentReview: 'before-ship', confirmShip: true })
 		expect(get({ 'amp.brisk.preset': 'strict', 'amp.brisk.confirmShipOnHigh': false, 'amp.brisk.agentReview': 'off' })).toMatchObject({ agentReview: 'off', confirmShip: false })
-		expect(get({ 'amp.brisk.preset': 'yolo', 'amp.brisk.agentReview': 'sometimes' })).toMatchObject({ preset: 'reviewed', agentReview: 'suggest' })
+		expect(get({ 'amp.brisk.preset': 'yolo', 'amp.brisk.agentReview': 'sometimes' })).toMatchObject({ preset: 'reviewed', agentReview: 'once-before-ship' })
 	})
 	test("the project's preset can only make agent review more automatic", () => {
 		const user = (r: string) => settingsFrom({ 'amp.brisk.agentReview': r }, root, {})
 		expect(reviewMode(user('suggest'), 'strict')).toBe('before-ship')
-		expect(reviewMode(user('suggest'), 'autonomous')).toBe('before-ship')
+		expect(reviewMode(user('suggest'), 'autonomous')).toBe('once-before-ship')
+		// reviewed is also what brisk reports for no preset, so it raises nothing.
+		expect(reviewMode(user('suggest'), 'reviewed')).toBe('suggest')
 		expect(reviewMode(user('suggest'), '__proto__')).toBe('suggest')
-		expect(settingsFrom({ 'amp.brisk.preset': 'constructor' }, root, {})).toMatchObject({ preset: 'reviewed', agentReview: 'suggest', confirmShip: false })
+		expect(reviewMode(user('once-before-ship'), 'strict')).toBe('before-ship')
+		// A stricter user setting wins over a looser repository.
+		expect(reviewMode(user('before-ship'), 'autonomous')).toBe('before-ship')
+		expect(settingsFrom({ 'amp.brisk.preset': 'constructor' }, root, {})).toMatchObject({ preset: 'reviewed', agentReview: 'once-before-ship', confirmShip: false })
 		expect(reviewMode(user('after-turn'), 'reviewed')).toBe('after-turn')
 		expect(reviewMode(user('before-ship'), 'unknown-preset')).toBe('before-ship')
 		expect(reviewMode(user('suggest'))).toBe('suggest')
@@ -457,13 +462,64 @@ describe('plugin', () => {
 		await rm(p.home, { recursive: true, force: true })
 	}
 
-	test('suggest (default): a quick action and a Ship line, nothing automatic', async () => {
-		const p = await reviewing({})
+	test('suggest: a quick action and a Ship line, nothing automatic', async () => {
+		const p = await reviewing({ 'amp.brisk.agentReview': 'suggest' })
 		expect(await p.fire('agent.end', done())).toBeUndefined()
 		expect([...p.actions]).toEqual(['Start agent review'])
 		const prompt = (await p.fire('changes.prompt', {})) as { append: string }
 		expect(prompt.append).toEndWith('brisk recommends an agent review: Removes an ownership check.')
 		expect(await p.fire('agent.start', { changesWorkflow: 'ship' })).toEqual({})
+		await cleanup(p)
+	})
+
+	test('once-before-ship (default): Ship runs the review only if none ran on this version', async () => {
+		const p = await reviewing({})
+		await p.fire('agent.end', done())
+		expect([...p.actions]).toEqual(['Start agent review'])
+		const ship = (await p.fire('agent.start', { changesWorkflow: 'ship', message: 'Ship it' })) as { message?: { content: string } }
+		expect(ship.message?.content).toStartWith('Before pushing: brisk recommends an agent review')
+		// That Ship turn was stopped, so the review did not happen: ask again.
+		await p.fire('agent.end', { ...done('Ship it'), status: 'cancelled', messages: [] })
+		expect(((await p.fire('agent.start', { changesWorkflow: 'ship', message: 'Ship it' })) as { message?: unknown }).message).toBeDefined()
+		// This one finished: the next Ship on the same version adds nothing.
+		await p.fire('agent.end', done('Ship it'))
+		expect(await p.fire('agent.start', { changesWorkflow: 'ship', message: 'Ship it' })).toEqual({})
+		await p.fire('agent.end', done('Ship it'))
+		// New changes (h2); the user clicks Start agent review but stops it.
+		await setHash('h2')
+		await p.fire('agent.end', done())
+		const click = agentReviewMessage({ ...floor, agent_review: { recommended: true, reason: 'Removes an ownership check.' } })
+		await p.fire('agent.start', { message: click })
+		await p.fire('agent.end', { ...done(click), status: 'cancelled', messages: [] })
+		expect(((await p.fire('agent.start', { changesWorkflow: 'ship', message: 'Ship it' })) as { message?: unknown }).message).toBeDefined()
+		await p.fire('agent.end', { ...done('Ship it'), status: 'cancelled', messages: [] })
+		// Clicked again and finished: that counts.
+		await p.fire('agent.start', { message: click })
+		await p.fire('agent.end', { ...done(click), messages: [] })
+		expect(await p.fire('agent.start', { changesWorkflow: 'ship', message: 'Ship it' })).toEqual({})
+		await p.fire('agent.end', done('Ship it'))
+		// New changes again (h3) with no review: Ship runs it.
+		await setHash('h3')
+		await p.fire('agent.end', done())
+		expect(((await p.fire('agent.start', { changesWorkflow: 'ship', message: 'Ship it' })) as { message?: unknown }).message).toBeDefined()
+		await cleanup(p)
+	})
+
+	test('a strict repository reviews on every Ship even for an after-turn user', async () => {
+		const p = await reviewing({ 'amp.brisk.agentReview': 'after-turn' }, 'strict')
+		const first = (await p.fire('agent.end', done())) as { userMessage: string }
+		await p.fire('agent.start', { message: first.userMessage })
+		await p.fire('agent.end', { ...done(first.userMessage), messages: [] })
+		expect(((await p.fire('agent.start', { changesWorkflow: 'ship', message: 'Ship it' })) as { message?: unknown }).message).toBeDefined()
+		await cleanup(p)
+	})
+
+	test("a looser repository preset does not lower a stricter user's review", async () => {
+		const p = await reviewing({ 'amp.brisk.agentReview': 'before-ship' }, 'reviewed')
+		await p.fire('agent.end', done())
+		await p.fire('agent.start', { message: agentReviewMessage({ ...floor, agent_review: { recommended: true, reason: 'x' } }) })
+		// before-ship reviews on every Ship, even after a review ran.
+		expect(((await p.fire('agent.start', { changesWorkflow: 'ship', message: 'Ship it' })) as { message?: unknown }).message).toBeDefined()
 		await cleanup(p)
 	})
 

@@ -8,7 +8,7 @@ import type { PluginAPI, PluginThread, QuickAction } from '@ampcode/plugin'
 import { assess, type Decide, type RunResult } from './src/brisk.ts'
 import { agentReviewMessage, labelsFor, reviewLine, reviewMessage, reviewRecommended, shipGate, shipLine, summary, unknownLine } from './src/present.ts'
 import { buildSession, readTranscript, turnsFromMessages } from './src/session.ts'
-import { readTrusted, resolveBinary, reviewMode, settingsFrom, type ReviewMode } from './src/settings.ts'
+import { PROJECT_RAISE, readTrusted, resolveBinary, reviewMode, settingsFrom, type ReviewMode } from './src/settings.ts'
 
 export const description =
 	"Rates how risky the thread's code changes are (Low, Medium, High) with brisk, and whether an agent review is recommended. Labels the thread, adds review quick actions, notes the risk in the Ship prompt, and can run the agent review automatically."
@@ -27,6 +27,11 @@ interface ThreadState {
 	reviewAction?: QuickAction
 	/** Diff hash of the last automatic review the plugin asked for. */
 	reviewRequested?: string
+	/** Diff hash the Start agent review quick action is for. */
+	reviewOffered?: string
+	/** Diff hash the current turn reviews, and that turn; it counts once the turn ends done. */
+	reviewStarted?: string
+	reviewTurn?: number
 	/** Diff hash of the last review that actually started, so each version is reviewed once. */
 	autoReviewed?: string
 	/** Counts agent turns, so a slow agent.end does not continue after the user moved on. */
@@ -88,6 +93,7 @@ export default function (amp: PluginAPI) {
 				s.action = undefined
 				s.reviewAction?.unsubscribe()
 				s.reviewAction = undefined
+				s.reviewOffered = undefined
 				await thread
 					.labels()
 					.then((l) => thread.setLabels(labelsFor(l, 'unknown')))
@@ -107,9 +113,11 @@ export default function (amp: PluginAPI) {
 			const def = { text: 'Start agent review', icon: 'sparkles' as const, action: 'send-message' as const, args: { message: agentReviewMessage(a) } }
 			if (s.reviewAction) s.reviewAction.update(def)
 			else s.reviewAction = thread.createQuickAction(def)
+			s.reviewOffered = a.provenance.diff_hash
 		} else {
 			s.reviewAction?.unsubscribe()
 			s.reviewAction = undefined
+			s.reviewOffered = undefined
 		}
 		await thread.setLabels(labelsFor(await thread.labels(), a.tier))
 		// Amp shows 5 quick actions per thread across plugins; the agent review
@@ -131,6 +139,11 @@ export default function (amp: PluginAPI) {
 
 	amp.on('agent.end', async (event, ctx) => {
 		const s = state(event.thread.id)
+		// A review counts only when its turn finished.
+		if (s.reviewTurn === s.turn) {
+			if (event.status === 'done' && s.reviewStarted) s.autoReviewed = s.reviewStarted
+			s.reviewStarted = s.reviewTurn = undefined
+		}
 		const touched = amp.helpers
 			.toolCallsInMessages(event.messages)
 			.some(({ call }) => amp.helpers.filesModifiedByToolCall(call)?.length || amp.helpers.shellCommandFromToolCall(call))
@@ -175,31 +188,41 @@ export default function (amp: PluginAPI) {
 	amp.on('agent.start', async (event, ctx) => {
 		const s = state(event.thread.id)
 		s.turn++
-		if (event.message.startsWith(REVIEW_PREFIX) && s.reviewRequested) s.autoReviewed = s.reviewRequested
+		// A review turn, started by the quick action or after-turn, counts
+		// as the review of the version it was offered for.
+		if (event.message.startsWith(REVIEW_PREFIX) && (s.reviewOffered ?? s.reviewRequested)) {
+			s.reviewStarted = s.reviewOffered ?? s.reviewRequested
+			s.reviewTurn = s.turn
+		}
 		if (!event.changesWorkflow) return {}
 		const cfg = await settings()
 		// The project's preset can only turn before-ship on, so look at the
 		// assessment unless the user turned agent review off entirely.
 		if (!cfg.confirmShip && cfg.agentReview === 'off') return {}
-		const inFlight = s.pending ?? s.running
-		const r = cfg.confirmShip
-			? await run(ctx.thread, (req) => ctx.ai.decide(req as Parameters<typeof ctx.ai.decide>[0]), ctx.logger.log)
-			: inFlight
-				? await inFlight
-				: (s.result ?? (await run(ctx.thread, (req) => ctx.ai.decide(req as Parameters<typeof ctx.ai.decide>[0]), ctx.logger.log)))
+		// Always a fresh assessment: files may have changed outside a turn,
+		// and whether a review already covers them depends on the diff hash.
+		const r = await run(ctx.thread, (req) => ctx.ai.decide(req as Parameters<typeof ctx.ai.decide>[0]), ctx.logger.log)
 		// before-ship (or after-turn, when the review has not run yet for
 		// this version): the Ship turn runs the review before pushing.
 		let review: { message: { content: string; display: boolean } } | {} = {}
 		let reviewing: string | undefined
 		if (r && !('error' in r) && reviewRecommended(r.assessment)) {
 			const mode = reviewMode(cfg, r.assessment.provenance.preset)
-			if (mode === 'before-ship' || (mode === 'after-turn' && s.autoReviewed !== r.assessment.provenance.diff_hash)) {
+			const preset = r.assessment.provenance.preset ?? ''
+			// before-ship reviews on every Ship; a strict repository asks for
+			// that even when the user chose after-turn, which ranks above it.
+			const always = mode === 'before-ship' || (mode !== 'off' && Object.hasOwn(PROJECT_RAISE, preset) && PROJECT_RAISE[preset] === 'before-ship')
+			if (always || (mode !== 'suggest' && mode !== 'off' && s.autoReviewed !== r.assessment.provenance.diff_hash)) {
 				reviewing = r.assessment.provenance.diff_hash
 				review = { message: { content: `Before pushing: ${agentReviewMessage(r.assessment)} Stop before pushing if it finds a blocker you cannot fix.`, display: true } }
 			}
 		}
 		// This Ship turn runs the review, so its agent.end must not start another.
-		const reviewed = () => void (reviewing && (s.autoReviewed = reviewing))
+		const reviewed = () => {
+			if (!reviewing) return
+			s.reviewStarted = reviewing
+			s.reviewTurn = s.turn
+		}
 		const ask = cfg.confirmShip && r ? shipGate(true, r) : undefined
 		if (!ask) {
 			reviewed()

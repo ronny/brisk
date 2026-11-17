@@ -15,10 +15,12 @@ import type { Mode } from './brisk.ts'
  * most automatic:
  * - off: nothing.
  * - suggest: a quick action and a line in the Ship prompt.
- * - before-ship: also tells the Ship and Push to Branch turn to run the review first.
+ * - once-before-ship: also makes sure one review ran on this version of the
+ *   changes before Ship: the Ship turn runs it unless one already ran.
+ * - before-ship: the Ship and Push to Branch turn always runs the review first.
  * - after-turn: also starts the review as soon as the agent's turn ends.
  */
-export const REVIEW_MODES = ['off', 'suggest', 'before-ship', 'after-turn'] as const
+export const REVIEW_MODES = ['off', 'suggest', 'once-before-ship', 'before-ship', 'after-turn'] as const
 export type ReviewMode = (typeof REVIEW_MODES)[number]
 
 /**
@@ -28,8 +30,9 @@ export type ReviewMode = (typeof REVIEW_MODES)[number]
 export const PRESETS: Record<string, { agentReview: ReviewMode; confirmShip: boolean }> = {
 	// Nobody reviews the agent's work, so the agent reviews it itself.
 	autonomous: { agentReview: 'after-turn', confirmShip: false },
-	// People review pull requests; brisk points them at the risky parts.
-	reviewed: { agentReview: 'suggest', confirmShip: false },
+	// At least one agent review before Ship, wherever it ran; people review
+	// pull requests too.
+	reviewed: { agentReview: 'once-before-ship', confirmShip: false },
 	// Review before every risky Ship, and a person confirms High.
 	strict: { agentReview: 'before-ship', confirmShip: true },
 }
@@ -47,18 +50,22 @@ export interface Settings {
 }
 
 /**
- * reviewMode is what to do about a recommended agent review. The project's
- * own preset (from its base .brisk.yaml, reported by brisk) can make this
- * more automatic than the user's settings, up to before-ship, never less,
- * and not when the user turned agent review off.
+ * What a repository's preset (from its base .brisk.yaml, reported by brisk
+ * as provenance.preset) raises agentReview to. reviewed is also what brisk
+ * reports when the file names no preset, so it raises nothing. A repository
+ * cannot choose after-turn: it would let a cloned repository make the agent
+ * start turns on its own.
+ */
+export const PROJECT_RAISE: Record<string, ReviewMode> = { autonomous: 'once-before-ship', strict: 'before-ship' }
+
+/**
+ * reviewMode is what to do about a recommended agent review: the user's
+ * setting, raised by the project's preset but never lowered, and never
+ * changed when the user turned agent review off.
  */
 export function reviewMode(cfg: Settings, projectPreset?: string): ReviewMode {
-	let project = projectPreset && Object.hasOwn(PRESETS, projectPreset) ? PRESETS[projectPreset].agentReview : undefined
-	// off is the user's explicit opt-out, so the project cannot override it.
+	const project = projectPreset && Object.hasOwn(PROJECT_RAISE, projectPreset) ? PROJECT_RAISE[projectPreset] : undefined
 	if (!project || cfg.agentReview === 'off') return cfg.agentReview
-	// Only the user can choose after-turn, so a cloned repository cannot
-	// make the agent start turns on its own.
-	if (project === 'after-turn') project = 'before-ship'
 	return REVIEW_MODES.indexOf(project) > REVIEW_MODES.indexOf(cfg.agentReview) ? project : cfg.agentReview
 }
 
