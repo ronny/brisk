@@ -222,16 +222,32 @@ func (w *Repo) hiddenByChange(ctx context.Context, base string) (hidden, code []
 	if err != nil || len(out) == 0 {
 		return nil, nil, err
 	}
+	list, err := w.Run(ctx, "ls-tree", "-r", "-z", base)
+	if err != nil {
+		return nil, nil, err
+	}
+	inBase := map[string]bool{}
+	var ignorePaths, ignoreOIDs []string
+	for _, e := range strings.Split(strings.TrimSuffix(string(list), "\x00"), "\x00") {
+		// <mode> SP <type> SP <oid> TAB <path>
+		meta, p, ok := strings.Cut(e, "\t")
+		if f := strings.Fields(meta); ok && len(f) == 3 && f[1] == "blob" {
+			inBase[p] = true
+			if path.Base(p) == ".gitignore" {
+				ignorePaths, ignoreOIDs = append(ignorePaths, p), append(ignoreOIDs, f[2])
+			}
+		}
+	}
 	var entries []string
 	for _, e := range strings.Split(strings.TrimSuffix(string(out), "\x00"), "\x00") {
-		if !expectedIgnored(w.Root, e) {
+		if !expectedIgnored(inBase, e) {
 			entries = append(entries, e)
 		}
 	}
 	if len(entries) == 0 {
 		return nil, nil, nil
 	}
-	baseRules, cleanup, err := w.baseIgnoreRules(ctx, base)
+	baseRules, cleanup, err := w.baseIgnoreRules(ctx, ignorePaths, ignoreOIDs)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -250,7 +266,7 @@ func (w *Repo) hiddenByChange(ctx context.Context, base string) (hidden, code []
 			files = append(files, e)
 			continue
 		}
-		found, complete := walkFiles(w.Root, e, &budget)
+		found, complete := walkFiles(w.Root, e, inBase, &budget)
 		files = append(files, found...)
 		if !complete {
 			hidden = append(hidden, e)
@@ -277,9 +293,10 @@ func (w *Repo) hiddenByChange(ctx context.Context, base string) (hidden, code []
 }
 
 // baseIgnoreRules makes a scratch repository whose ignore rules are the
-// base commit's .gitignore files plus the real info/exclude, so git's own
-// matcher can say what the base would have ignored.
-func (w *Repo) baseIgnoreRules(ctx context.Context, base string) (*Repo, func(), error) {
+// base commit's .gitignore files (paths with their blob oids) plus the
+// real info/exclude and core.excludesFile, so git's own matcher can say
+// what the base would have ignored.
+func (w *Repo) baseIgnoreRules(ctx context.Context, paths, oids []string) (*Repo, func(), error) {
 	tmp, err := os.MkdirTemp("", "brisk-ignore-*")
 	if err != nil {
 		return nil, nil, err
@@ -289,18 +306,6 @@ func (w *Repo) baseIgnoreRules(ctx context.Context, base string) (*Repo, func(),
 	rules := &Repo{Root: tmp}
 	if _, err := rules.run(ctx, nil, "init", "-q"); err != nil {
 		return fail(err)
-	}
-	list, err := w.Run(ctx, "ls-tree", "-r", "-z", base)
-	if err != nil {
-		return fail(err)
-	}
-	var paths, oids []string
-	for _, e := range strings.Split(strings.TrimSuffix(string(list), "\x00"), "\x00") {
-		// <mode> SP <type> SP <oid> TAB <path>
-		meta, p, ok := strings.Cut(e, "\t")
-		if f := strings.Fields(meta); ok && len(f) == 3 && f[1] == "blob" && path.Base(p) == ".gitignore" {
-			paths, oids = append(paths, p), append(oids, f[2])
-		}
 	}
 	if len(oids) > 0 {
 		out, err := w.RunInput(ctx, []byte(strings.Join(oids, "\n")+"\n"), "cat-file", "--batch")
@@ -375,20 +380,21 @@ func checkIgnore(ctx context.Context, r *Repo, paths []string) (map[string]bool,
 	return set, nil
 }
 
-// expectedIgnored reports whether p, relative to root, is a directory of
-// dependencies or build output, which projects routinely ignore. Caches
-// and node_modules count anywhere. Build-output and virtualenv names count
-// only at the repository root or beside a project manifest, so a package
-// that happens to be called tmp or out is still checked. vendor/ counts
-// only beside composer.json: Go compiles vendored code.
-func expectedIgnored(root, p string) bool {
+// expectedIgnored reports whether p is a directory of dependencies or
+// build output, which projects routinely ignore. Caches and node_modules
+// count anywhere. Build-output and virtualenv names count only at the
+// repository root or beside a project manifest that the base commit has,
+// so neither a package that happens to be called tmp nor a manifest the
+// change adds makes them exempt. vendor/ counts only beside composer.json:
+// Go compiles vendored code.
+func expectedIgnored(inBase map[string]bool, p string) bool {
 	if !strings.HasSuffix(p, "/") {
 		return false
 	}
 	parent := path.Dir(strings.TrimSuffix(p, "/"))
 	beside := func(names ...string) bool {
 		for _, n := range names {
-			if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(parent), n)); err == nil {
+			if inBase[path.Join(parent, n)] {
 				return true
 			}
 		}
@@ -429,7 +435,7 @@ func isCode(abs string) bool {
 // walkFiles lists regular files under dir, relative to root, skipping
 // nested .git and expected-ignored directories. It spends *budget visits
 // and reports whether it saw the whole directory.
-func walkFiles(root, dir string, budget *int) ([]string, bool) {
+func walkFiles(root, dir string, inBase map[string]bool, budget *int) ([]string, bool) {
 	var out []string
 	complete := true
 	filepath.WalkDir(filepath.Join(root, filepath.FromSlash(dir)), func(abs string, d os.DirEntry, err error) error {
@@ -447,7 +453,7 @@ func walkFiles(root, dir string, budget *int) ([]string, bool) {
 		}
 		rel = filepath.ToSlash(rel)
 		if d.IsDir() {
-			if d.Name() == ".git" || rel+"/" != dir && expectedIgnored(root, rel+"/") {
+			if d.Name() == ".git" || rel+"/" != dir && expectedIgnored(inBase, rel+"/") {
 				return filepath.SkipDir
 			}
 			return nil

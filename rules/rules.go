@@ -5,6 +5,7 @@
 package rules
 
 import (
+	"bytes"
 	"fmt"
 	"path"
 	"path/filepath"
@@ -208,6 +209,30 @@ func touched(s *risk.Session, p, root string) bool {
 	return false
 }
 
+var (
+	generatorInput = globs("**/*.proto", "**/*.graphql", "**/*.graphqls", "**/*.sql", "**/sqlc.y*ml", "**/sqlc.json",
+		"**/buf.gen.y*ml", "**/buf.y*ml", "**/openapi*.y*ml", "**/openapi*.json", "**/swagger*.y*ml", "**/swagger*.json", "**/schema.prisma")
+	generatorCommand = regexp.MustCompile(`\b(buf\s+generate|protoc|sqlc\s+generate|go\s+generate|openapi-generator|oapi-codegen|graphql-codegen|prisma\s+generate|orval|gqlgen|mockgen|stringer)\b`)
+)
+
+// generatorRan reports whether the change edits a generator's input, or
+// adds a //go:generate directive, or the session ran a generator.
+func generatorRan(cs *risk.ChangeSet, session *risk.Session) bool {
+	for _, fc := range cs.Files {
+		if generatorInput(fc.Path) || fc.Status != risk.Deleted && bytes.Contains(fc.New, []byte("//go:generate")) && !HasGeneratedMarker(fc.New) {
+			return true
+		}
+	}
+	if session != nil {
+		for _, c := range session.Commands {
+			if generatorCommand.MatchString(c.Command) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func codeOnly(fc risk.FileChange) bool {
 	return !IsTest(fc.Path) && !IsDoc(fc.Path) && !IsGeneratedChange(fc)
 }
@@ -381,13 +406,20 @@ func Apply(cs *risk.ChangeSet, findings []risk.Finding, session *risk.Session, c
 	}
 
 	// A new file that claims to be generated is analysed, since the claim
-	// is the change's own, but its findings stop at Medium: generated code
-	// (protobuf getters for page tokens, sqlc queries) trips the auth and
-	// SQL detectors, and the file's diff still goes to the model.
+	// is the change's own. Generated code (protobuf getters for page
+	// tokens, sqlc queries) trips the auth and SQL detectors, so when the
+	// change shows a generator ran, its findings stop at Medium; the diff
+	// still goes to the model. Without that evidence the claim is flagged
+	// and the findings keep their tier.
 	claimsGenerated := map[string]bool{}
+	ran := generatorRan(cs, session)
 	for _, fc := range cs.Files {
 		if fc.Status == risk.Added && (generatedName(fc.Path) || HasGeneratedMarker(fc.New)) {
-			claimsGenerated[fc.Path] = true
+			if ran {
+				claimsGenerated[fc.Path] = true
+			} else {
+				add("generated_without_source", risk.Medium, "Adds a file that says it is generated, but nothing in the change regenerates it", "rule", risk.Evidence{Path: fc.Path})
+			}
 		}
 	}
 	for _, f := range findings {
