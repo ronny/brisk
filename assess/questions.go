@@ -41,13 +41,24 @@ var Questions = map[string]risk.Question{
 		Type:         "noul",
 		Instructions: "Does this change break a contract other code, clients, or services depend on, such as a public API, RPC or protobuf message, database schema, event payload, configuration format, or command-line flags, without keeping the old form working?" + guard,
 	},
+	// follow_up_fix is the strongest single answer in the recall research
+	// (AUC 0.77 train, 0.74 test on repo A and repo B). It is a
+	// calibrated feature of its own, not one of the flags.
+	"follow_up_fix": {
+		Type:         "noul",
+		Instructions: "Will someone probably have to fix a bug in the code this change adds or modifies within the next two weeks?" + guard,
+	},
 	"breaks_deploy": {
 		Type:         "noul",
 		Instructions: "Could this change break the build, CI, or deployment, or fail when it starts in production because of configuration, environment, or dependency changes?" + guard,
 	},
 }
 
-// flagText explains a yes answer to each noul question.
+// followUpText explains a yes answer to follow_up_fix.
+const followUpText = "Likely to need a bug fix within two weeks"
+
+// flagText explains a yes answer to each noul question that counts toward
+// the flags feature.
 var flagText = map[string]string{
 	"weakens_auth":    "May weaken access checks",
 	"destroys_data":   "May delete or corrupt stored data",

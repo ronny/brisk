@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ronny/brisk/calibration"
 	"github.com/ronny/brisk/risk"
 )
 
@@ -1134,5 +1136,49 @@ func TestBusinessRulesFile(t *testing.T) {
 		if code, _, errs := runCLI(t, "assess", "--repo", dir, "--base", "HEAD"); code != 1 || !strings.Contains(errs, want) {
 			t.Errorf("config %q: exit %d stderr %q, want %q", config, code, errs, want)
 		}
+	}
+}
+
+// follow_up_fix is asked in the main request and moves the calibrated risk
+// by exactly its own weight; it does not count as one of the flags.
+func TestFollowUpFixIsCalibrated(t *testing.T) {
+	dir := newRepo(t)
+	write(t, dir, "internal/store/users.go", "package store\n\nfunc Users() { /* v2 */ }\n")
+	code, out, errs := runCLI(t, "assess", "--repo", dir, "--base", "HEAD", "--backend", "host", "--format", "json")
+	if code != 0 {
+		t.Fatal(errs)
+	}
+	var req risk.HostRequest
+	if err := json.Unmarshal([]byte(out), &req); err != nil {
+		t.Fatal(err)
+	}
+	if q, ok := req.Questions["follow_up_fix"]; !ok || q.Type != "noul" {
+		t.Fatalf("questions %v; want follow_up_fix as a yes/no question", req.Questions)
+	}
+	risk01 := func(v float64) float64 {
+		ans := map[string]risk.Answer{}
+		for name, q := range req.Questions {
+			x := 0.0
+			if name == "follow_up_fix" {
+				x = v
+			}
+			if q.Type == "noul" {
+				ans[name] = risk.Answer{Type: "noul", Noul: &x}
+			} else {
+				ans[name] = risk.Answer{Type: "score", Score: &x}
+			}
+		}
+		b, _ := json.Marshal(risk.HostAnswers{Schema: risk.HostAnswersSchema, RequestID: req.RequestID, Model: "jev-1.14.0", Answers: ans})
+		p := filepath.Join(t.TempDir(), "a.json")
+		os.WriteFile(p, b, 0o644)
+		return *assessJSON(t, "--repo", dir, "--base", "HEAD", "--answers", p).Provenance.ModelRisk
+	}
+	table, _, err := calibration.For("jev-1.14.0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := table.Weights["follow_up"]
+	if got := risk01(1) - risk01(0); w <= 0 || math.Abs(got-w) > 0.002 {
+		t.Fatalf("follow_up_fix 1 vs 0 moved model risk by %.3f, want its weight %.3f (and not the flags weight %.3f)", got, w, table.Weights["flags"])
 	}
 }

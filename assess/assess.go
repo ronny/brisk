@@ -345,6 +345,9 @@ func Features(answers map[string]risk.Answer, history, size float64) map[string]
 			f["flags"] = clamp(*a.Noul)
 		}
 	}
+	if a := answers["follow_up_fix"]; a.Noul != nil {
+		f["follow_up"] = clamp(*a.Noul)
+	}
 	f["history"] = history
 	f["size"] = size
 	return f
@@ -551,6 +554,8 @@ func modelReasons(t *calibration.Table, feats map[string]float64, risk01 float64
 		switch p.name {
 		case "size":
 			add("size", fmt.Sprintf("Large change: +%d -%d lines across %d files", stats.Additions, stats.Deletions, stats.Files))
+		case "follow_up":
+			add("follow_up_fix", answerText("follow_up_fix", answers))
 		case "history":
 			add("history", "The changed files were fixed or reverted often before")
 		case "impact", "uncertainty":
@@ -583,6 +588,8 @@ func answerText(q string, answers map[string]risk.Answer) string {
 		return fmt.Sprintf("Weakly verified (model: %.1f of 3)", *a.Score)
 	case flagText[q] != "":
 		return fmt.Sprintf("%s (model: %.2f)", flagText[q], noul(a))
+	case q == "follow_up_fix":
+		return fmt.Sprintf("%s (model: %.2f)", followUpText, noul(a))
 	}
 	return q
 }

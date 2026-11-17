@@ -23,7 +23,7 @@ type FitOptions struct {
 }
 
 // FeatureNames are every feature a table can weight.
-var FeatureNames = []string{"impact", "uncertainty", "impact_x_uncertainty", "flags", "history", "size"}
+var FeatureNames = []string{"impact", "uncertainty", "impact_x_uncertainty", "flags", "follow_up", "history", "size"}
 
 // Fit chooses weights that maximise PR-AUC of floor+risk on the training
 // records, then thresholds that meet the flag budget. It searches a 0.1

@@ -39,7 +39,7 @@ type CustomQuestion struct {
 }
 
 // featureNames are calibration features that also name model reasons.
-var featureNames = []string{"size", "history", "flags", "impact_x_uncertainty"}
+var featureNames = []string{"size", "history", "flags", "follow_up", "impact_x_uncertainty"}
 
 var questionID = regexp.MustCompile(`^[a-z][a-z0-9_]{1,40}$`)
 
@@ -119,12 +119,12 @@ func f(x float64) *float64 { return &x }
 //
 //   - autonomous: nobody reviews changes by hand. High asks for an agent
 //     review. The model alone puts the riskiest 18% of changes at High;
-//     with the rule floor that is about 26% High and 29% agent reviews in
+//     with the rule floor that is about 25% High and 29% agent reviews in
 //     the evaluation, under a ~30% review budget.
 //   - reviewed: teams with human reviewers. The calibrated thresholds; High
 //     asks for a human review, and an agent review is recommended for High
 //     and for strong single signals.
-//   - strict: high-stakes code. Medium and High are widened (about 41%
+//   - strict: high-stakes code. Medium and High are widened (about 39%
 //     High in the evaluation), and every
 //     Medium or High change gets an agent review before a human one.
 var Presets = map[string]Policy{
@@ -450,6 +450,9 @@ func (p Policy) AgentReview(tier risk.Tier, hits []string, answers map[string]ri
 	for _, q := range qs {
 		if v := noul(answers[q]); answers[q].Noul != nil && v >= r.Questions[q] {
 			text := flagText[q]
+			if q == "follow_up_fix" {
+				text = followUpText
+			}
 			if text == "" {
 				text = "Jev flagged a risk"
 			}

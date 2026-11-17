@@ -22,9 +22,10 @@ type Table struct {
 	ID     string   `json:"id"`     // e.g. "jev-1.14"
 	Models []string `json:"models"` // normalised model versions this table fits
 	// Weights per feature. Features are: impact (score/3), uncertainty
-	// (score/3), impact_x_uncertainty, flags (the largest noul answer),
-	// history (prior fixes to the changed files, 0–1), and size (changed
-	// lines on a log scale, 0–1).
+	// (score/3), impact_x_uncertainty, flags (the largest of the four risk
+	// flag answers), follow_up (the follow_up_fix answer), history (prior
+	// fixes to the changed files, 0–1), and size (changed lines on a log
+	// scale, 0–1).
 	Weights    map[string]float64 `json:"weights"`
 	Thresholds Thresholds         `json:"thresholds"`
 	// Overrides raise the model tier when one answer alone is strong

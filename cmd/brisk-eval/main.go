@@ -461,7 +461,7 @@ func score(args []string) error {
 			FittedOn: fmt.Sprintf("%d changes: the oldest %.0f%% of %s", len(train), *split*100, strings.Join(repos, ", ")),
 		})
 		table.RiskQuantiles = eval.RiskQuantiles(train, runs, table)
-		table.Notes = "Fitted by brisk-eval score. Features: impact and uncertainty are Jev scores / 3, flags is the largest yes/no answer, history is prior fixes to the changed files."
+		table.Notes = "Fitted by brisk-eval score. Features: impact and uncertainty are Jev scores / 3, flags is the largest of the four yes/no risk answers, follow_up is the follow_up_fix answer, history is prior fixes to the changed files."
 		if *fitOut != "" {
 			b, _ := json.MarshalIndent(table, "", "  ")
 			if err := os.WriteFile(*fitOut, append(b, '\n'), 0o644); err != nil {
@@ -585,8 +585,11 @@ func score(args []string) error {
 		}
 		riskSpread = append(riskSpread, hi-lo)
 	}
-	rep.Stability = map[string]any{"changes": n, "tier_flips": eval.NewProportion(flips, n),
-		"model_risk_range_p50": eval.Percentile(riskSpread, 50), "model_risk_range_p95": eval.Percentile(riskSpread, 95)}
+	rep.Stability = map[string]any{"changes": n, "tier_flips": eval.NewProportion(flips, n)}
+	if n > 0 { // JSON has no NaN: leave the ranges out without a sample
+		rep.Stability["model_risk_range_p50"] = eval.Percentile(riskSpread, 50)
+		rep.Stability["model_risk_range_p95"] = eval.Percentile(riskSpread, 95)
+	}
 
 	// Latency: prepare time per change, plus the model time of sequential
 	// calls (batch answers run many at once and overstate it).
@@ -621,7 +624,10 @@ func score(args []string) error {
 	rep.Cost["est_input_tokens"] = meanChars / 3.5
 	rep.Cost["est_usd_per_assessment"] = meanChars / 3.5 * 0.042 / 1e6
 
-	b, _ := json.MarshalIndent(rep, "", "  ")
+	b, err := json.MarshalIndent(rep, "", "  ")
+	if err != nil {
+		return fmt.Errorf("report: %w", err)
+	}
 	if *reportPath != "" {
 		if err := os.WriteFile(*reportPath, b, 0o644); err != nil {
 			return err

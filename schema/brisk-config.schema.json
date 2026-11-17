@@ -78,7 +78,7 @@
     },
     "preset": {
       "enum": ["autonomous", "reviewed", "strict"],
-      "description": "autonomous: nobody reviews by hand; High (about 26% of changes in the evaluation) asks for an agent review. reviewed (default): human reviewers; the calibrated thresholds. strict: high-stakes code; wider Medium and High, and an agent review for every Medium or High change. The names match the Amp plugin's amp.brisk.preset."
+      "description": "autonomous: nobody reviews by hand; High (about 25% of changes in the evaluation) asks for an agent review. reviewed (default): human reviewers; the calibrated thresholds. strict: high-stakes code; wider Medium and High, and an agent review for every Medium or High change. The names match the Amp plugin's amp.brisk.preset."
     },
     "high_share": { "$ref": "#/$defs/share", "description": "Share of changes the model alone puts at High, through the calibration's risk quantiles" },
     "medium_share": { "$ref": "#/$defs/share", "description": "Share of changes the model alone puts at Medium or above" },

@@ -97,6 +97,7 @@ var reviewAreaFor = map[string]string{
 	"brisk_config":                "risk_policy",
 	"session:verification_failed": "verification",
 	"uncertainty":                 "weak_verification",
+	"follow_up_fix":               "weak_verification",
 }
 
 // maxReviewQuestions caps the areas Jev scores; the rest stay unscored.
