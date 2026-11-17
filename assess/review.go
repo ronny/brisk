@@ -218,10 +218,10 @@ func (p *Prepared) buildPlan(fired []string, firedTier map[string]risk.Tier, rev
 	}
 	prov := &risk.ReviewPlanProvenance{Scores: map[string]float64{}, Dropped: []string{}}
 	if asked > 0 && review != nil {
-		prov.Tailored = true
+		prov.Tailored, prov.Status = true, "tailored"
 		for q := range p.ReviewQuestions {
 			if a, ok := review[q]; !ok || a.Score == nil {
-				prov.Tailored = false
+				prov.Tailored, prov.Status = false, ""
 			}
 		}
 	}

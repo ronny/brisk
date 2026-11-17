@@ -90,9 +90,11 @@
         "review_plan": {
           "type": "object",
           "description": "How the model tailored agent_review.plan; absent when the plan is empty.",
-          "required": ["tailored", "scores", "dropped"],
+          "required": ["status", "tailored", "scores", "dropped"],
           "properties": {
-            "tailored": { "type": "boolean", "description": "False when there were no review answers; the plan is then brisk's full list, required areas first, then in hit order" },
+            "status": { "enum": ["tailored", "not_asked", "pending", "failed"], "description": "tailored: the model's scores were applied. not_asked: the policy (agent_review.tailor_plan) or a rules-only run did not ask. pending: the policy wanted review answers but none were given. failed: the review call failed; see error. Only tailored changes the plan." },
+            "error": { "type": "string", "description": "Why the review call failed" },
+            "tailored": { "type": "boolean", "description": "status is tailored. Otherwise the plan is brisk's full list, required areas first, then in hit order" },
             "scores": { "type": "object", "additionalProperties": { "type": "number" } },
             "dropped": { "type": "array", "items": { "type": "string" }, "description": "Area IDs scored below 1; required areas are never dropped" }
           }

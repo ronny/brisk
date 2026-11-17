@@ -55,9 +55,12 @@ type Prepared struct {
 	ReviewQuestions map[string]risk.Question
 	// ReviewAnswers are the answers to ReviewQuestions, when there are any.
 	ReviewAnswers map[string]risk.Answer
-	Policy        Policy
-	Timings       map[string]float64
-	started       time.Time
+	// ReviewError says why the review call failed; ReviewUsage is its cost.
+	ReviewError string
+	ReviewUsage *risk.Usage
+	Policy      Policy
+	Timings     map[string]float64
+	started     time.Time
 }
 
 // Prepare collects the change and everything rules can decide.
@@ -123,7 +126,9 @@ func (e *Engine) Prepare(ctx context.Context, in Input) (*Prepared, error) {
 			return nil, err
 		}
 		p.Request, p.RequestID = &req, id
-		p.ReviewQuestions = reviewQuestions(p.planCandidates())
+		if p.Policy.TailorPlan() != "never" {
+			p.ReviewQuestions = reviewQuestions(p.planCandidates())
+		}
 	}
 	return p, nil
 }
@@ -240,20 +245,7 @@ func (p *Prepared) Answer(ctx context.Context, b risk.Backend) risk.Assessment {
 		return p.Finish("rules-only", nil, "")
 	}
 	t := time.Now()
-	// The review questions go in their own call, in parallel; without
-	// their answers the plan is brisk's alone, which is not an error.
-	review := make(chan map[string]risk.Answer, 1)
-	go func() {
-		if rq := p.ReviewRequest(); rq != nil {
-			if r, err := b.Answer(ctx, *rq); err == nil {
-				review <- r.Answers
-				return
-			}
-		}
-		review <- nil
-	}()
 	resp, err := b.Answer(ctx, *p.Request)
-	p.ReviewAnswers = <-review
 	p.Timings["model"] = float64(time.Since(t).Microseconds()) / 1000
 	if err == risk.ErrNoModel {
 		return p.Finish("rules-only", nil, "")
@@ -261,7 +253,40 @@ func (p *Prepared) Answer(ctx context.Context, b risk.Backend) risk.Assessment {
 	if err != nil {
 		return p.Finish("rules-only", nil, b.Name()+": "+err.Error())
 	}
+	a := p.Finish(b.Name(), &resp, "")
+	// The review questions are a second call on the same state, made only
+	// when the policy wants it (by default: when a review is recommended).
+	// Without their answers the plan is brisk's alone, which is not an error.
+	if !p.WantsReviewAnswers(a) {
+		return a
+	}
+	t = time.Now()
+	r, err := b.Answer(ctx, *p.ReviewRequest())
+	p.Timings["review_model"] = float64(time.Since(t).Microseconds()) / 1000
+	switch {
+	case err != nil:
+		p.ReviewError = b.Name() + ": " + err.Error()
+	case !answersAll(r.Answers, p.ReviewQuestions):
+		p.ReviewError = b.Name() + ": the review answers do not answer every review question"
+	default:
+		p.ReviewAnswers, p.ReviewUsage = r.Answers, r.Usage
+	}
 	return p.Finish(b.Name(), &resp, "")
+}
+
+// WantsReviewAnswers reports whether the review questions should be asked
+// for assessment a, made from the main answers.
+func (p *Prepared) WantsReviewAnswers(a risk.Assessment) bool {
+	if p.ReviewRequest() == nil {
+		return false
+	}
+	switch p.Policy.TailorPlan() {
+	case "always":
+		return true
+	case "recommended":
+		return a.AgentReview.Recommended
+	}
+	return false
 }
 
 // ReviewRequest is the request that scores the review plan, or nil.
@@ -446,6 +471,27 @@ func (p *Prepared) Finish(backend string, resp *risk.Response, degraded string) 
 		review = p.ReviewAnswers
 	}
 	a.AgentReview.Plan, a.Provenance.ReviewPlan = p.buildPlan(firedIDs, firedTier, review)
+	if rp := a.Provenance.ReviewPlan; rp != nil && !rp.Tailored {
+		switch {
+		case resp == nil:
+			rp.Status = "not_asked"
+		case p.ReviewError != "":
+			rp.Status, rp.Error = "failed", p.ReviewError
+		case p.WantsReviewAnswers(a):
+			rp.Status = "pending"
+		default:
+			rp.Status = "not_asked"
+		}
+	}
+	if resp != nil && p.ReviewUsage != nil {
+		u := risk.Usage{}
+		if a.Provenance.Usage != nil {
+			u = *a.Provenance.Usage
+		}
+		u.InputTokens += p.ReviewUsage.InputTokens
+		u.CostUSD += p.ReviewUsage.CostUSD
+		a.Provenance.Usage = &u
+	}
 	a.Provenance.Preset = p.Policy.Preset
 	a.Provenance.DurationMS = time.Since(p.started).Milliseconds()
 	return a
@@ -536,3 +582,13 @@ func noul(a risk.Answer) float64 {
 }
 
 func round2(x float64) float64 { return math.Round(x*100) / 100 }
+
+// answersAll reports whether ans answers every question in qs.
+func answersAll(ans map[string]risk.Answer, qs map[string]risk.Question) bool {
+	for q := range qs {
+		if _, ok := ans[q]; !ok {
+			return false
+		}
+	}
+	return true
+}

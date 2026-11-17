@@ -205,7 +205,12 @@ type ReviewCheck struct {
 
 // ReviewPlanProvenance records how the model tailored the review plan.
 type ReviewPlanProvenance struct {
-	Tailored bool               `json:"tailored"` // the model scored the areas
+	// Status is "tailored" (the model scored the areas), "not_asked" (the
+	// policy or backend did not ask), "pending" (a harness was meant to
+	// answer review_questions and gave no answers), or "failed".
+	Status   string             `json:"status"`
+	Error    string             `json:"error,omitempty"` // why the review call failed
+	Tailored bool               `json:"tailored"`        // Status == "tailored"
 	Scores   map[string]float64 `json:"scores"`
 	Dropped  []string           `json:"dropped"` // areas scored below 1, never required ones
 }
@@ -331,6 +336,10 @@ type HostRequest struct {
 	// ReviewQuestions score the review plan's areas. Answer them in a
 	// separate call on the same state; they are optional.
 	ReviewQuestions map[string]Question `json:"review_questions,omitempty"`
+	// ReviewWhen says when to answer ReviewQuestions: "always", or
+	// "recommended": only when the assessment from the main answers
+	// recommends an agent review (then rerun with review_answers).
+	ReviewWhen string `json:"review_when,omitempty"`
 	// Floor is the rules-only result, so a harness can show something
 	// before it has answers or when answering fails.
 	Floor Assessment `json:"floor_assessment"`
@@ -345,6 +354,10 @@ type HostAnswers struct {
 	Usage     *Usage            `json:"usage,omitempty"`
 	// ReviewAnswers answer the request's review_questions; optional.
 	ReviewAnswers map[string]Answer `json:"review_answers,omitempty"`
+	// ReviewError says why the harness's review call failed, if it did.
+	ReviewError string `json:"review_error,omitempty"`
+	// ReviewUsage is the review call's cost; it is added to usage.
+	ReviewUsage *Usage `json:"review_usage,omitempty"`
 }
 
 // ---------------------------------------------------------------------------
@@ -492,6 +505,10 @@ type AgentReviewConfig struct {
 	Questions map[string]float64 `json:"questions,omitempty" yaml:"questions"`
 	// Rules recommends one when any of these hits fires.
 	Rules []string `json:"rules,omitempty" yaml:"rules"`
+	// TailorPlan says when to ask the model to score the review plan:
+	// "recommended" (default: only when a review is recommended),
+	// "always", or "never".
+	TailorPlan *string `json:"tailor_plan,omitempty" yaml:"tailor_plan"`
 }
 
 // PathRule marks paths that need at least a given tier.

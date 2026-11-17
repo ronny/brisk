@@ -114,6 +114,7 @@
         "min_tier": { "enum": ["low", "medium", "high", "none"], "description": "Recommend at or above this tier; none turns the tier condition off" },
         "min_uncertainty": { "type": "number", "minimum": 0, "maximum": 3, "description": "Recommend when Jev rates the change at least this weakly verified; 0 turns it off" },
         "questions": { "type": "object", "additionalProperties": { "type": "number" }, "description": "Recommend when a yes/no answer reaches its minimum, such as weakens_auth: 0.5" },
+        "tailor_plan": { "enum": ["recommended", "always", "never"], "default": "recommended", "description": "When to ask the model to score the review plan, a second model call: only when a review is recommended (default), always, or never" },
         "rules": { "type": "array", "items": { "type": "string" }, "description": "Recommend when any of these hit IDs fires" }
       }
     }

@@ -10,6 +10,8 @@
     "request_id": { "type": "string" },
     "model": { "type": "string", "description": "Exact model version that answered, e.g. amp.ai.decide's result.model (\"jev-1.14.0\")" },
     "answers": { "type": "object", "additionalProperties": { "$ref": "answer.schema.json" } },
+    "review_error": { "type": "string", "description": "Why the harness's review call failed; recorded as provenance.review_plan status failed" },
+    "review_usage": { "type": "object", "properties": { "input_tokens": { "type": "integer" }, "cost_usd": { "type": "number" } }, "description": "The review call's cost; brisk adds it to provenance.usage" },
     "review_answers": { "type": "object", "additionalProperties": { "$ref": "answer.schema.json" }, "description": "Optional answers to the request's review_questions. Missing or partial: the review plan is brisk's alone, not degraded." },
     "usage": {
       "type": "object",

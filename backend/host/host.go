@@ -108,3 +108,21 @@ func (a *Answers) ReviewAnswers() map[string]risk.Answer {
 	}
 	return a.File.ReviewAnswers
 }
+
+// ReviewResult returns the review answers, the harness's error for its
+// review call, and the call's cost. Partial answers count as a failure.
+func (a *Answers) ReviewResult() (map[string]risk.Answer, string, *risk.Usage) {
+	if len(a.Review) == 0 {
+		return nil, "", nil // nothing was asked; ignore what was sent
+	}
+	if a.File.ReviewError != "" {
+		return nil, "host: " + a.File.ReviewError, nil
+	}
+	if a.File.ReviewAnswers == nil {
+		return nil, "", nil
+	}
+	if ans := a.ReviewAnswers(); ans != nil {
+		return ans, "", a.File.ReviewUsage
+	}
+	return nil, "host: review_answers do not answer every review question", nil
+}

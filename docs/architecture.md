@@ -85,7 +85,7 @@ Review conditions are ORed. They use existing answers and rule hits, without ano
 Every assessment includes `agent_review: { recommended, reason }`, including the host request's `floor_assessment`.
 The recommendation is independent of the tier: Low or Medium can also warrant an agent review.
 `agent_review.plan` lists review areas with evidence and checks, most important first. Area and check text come from brisk's catalog or the base config's `review_checks`, never from the model.
-The model only scores each area 0–3, through optional host `review_questions` answered in a separate call. Low-scoring areas that no High rule or override requires are dropped. Without those answers the plan is brisk's full list.
+The model only scores each area 0–3 in a second call on the same state, made by default only when a review is recommended (`agent_review.tailor_plan`). Its cost is added to `provenance.usage`, and `provenance.review_plan.status` separates tailored, not asked, pending and failed. Low-scoring areas that no High rule or override requires are dropped. Without those answers the plan is brisk's full list.
 The recommendation does not perform review or prove approval.
 
 Policy provenance includes:

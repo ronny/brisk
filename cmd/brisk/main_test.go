@@ -974,10 +974,26 @@ review_checks:
 	if rp := a.Provenance.ReviewPlan; rp == nil || !rp.Tailored || !slices.Equal(rp.Dropped, []string{"stored_data"}) || rp.Scores["stored_data"] != 0.4 {
 		t.Fatalf("review_plan provenance %+v", a.Provenance.ReviewPlan)
 	}
-	// Without review answers: the full plan, untailored, not degraded.
+	// Without review answers: the full plan, untailored, not degraded; the
+	// change is High, so the default policy wanted them: pending.
+	if req.ReviewWhen != "recommended" {
+		t.Fatalf("review_when %q, want recommended", req.ReviewWhen)
+	}
 	a = assessJSON(t, "--repo", dir, "--base", "HEAD", "--answers", answers(nil))
-	if !slices.Equal(ids(a.AgentReview.Plan), want) || a.Provenance.ReviewPlan.Tailored || a.Provenance.Degraded != "" {
+	if !slices.Equal(ids(a.AgentReview.Plan), want) || a.Provenance.ReviewPlan.Status != "pending" || a.Provenance.Degraded != "" {
 		t.Fatalf("untailored plan %v provenance %+v degraded %q", ids(a.AgentReview.Plan), a.Provenance.ReviewPlan, a.Provenance.Degraded)
+	}
+	// A harness's failed review call is recorded as failed, with its error.
+	var f risk.HostAnswers
+	b, _ := os.ReadFile(answers(nil))
+	json.Unmarshal(b, &f)
+	f.ReviewError = "decide timed out"
+	b, _ = json.Marshal(f)
+	failed := filepath.Join(t.TempDir(), "f.json")
+	os.WriteFile(failed, b, 0o644)
+	a = assessJSON(t, "--repo", dir, "--base", "HEAD", "--answers", failed)
+	if rp := a.Provenance.ReviewPlan; rp.Status != "failed" || rp.Error != "host: decide timed out" || a.Provenance.Degraded != "" {
+		t.Fatalf("failed review call: provenance %+v degraded %q", rp, a.Provenance.Degraded)
 	}
 
 	// A project rule named "rule" keeps its own config area, and a file

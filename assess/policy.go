@@ -58,6 +58,15 @@ func (p Policy) questionText(id, text string, answers map[string]risk.Answer) st
 	return text
 }
 
+// TailorPlan says when to ask the model to score the review plan;
+// "recommended" unless the config chose otherwise.
+func (p Policy) TailorPlan() string {
+	if p.Review.TailorPlan == "" {
+		return "recommended"
+	}
+	return p.Review.TailorPlan
+}
+
 // RequestQuestions returns brisk's questions plus the project's.
 func (p Policy) RequestQuestions() map[string]risk.Question {
 	if len(p.Questions) == 0 {
@@ -78,6 +87,7 @@ type ReviewPolicy struct {
 	MinUncertainty float64            // Jev's uncertainty score, 0–3; 0 is off
 	Questions      map[string]float64 // yes/no answer minimums
 	Rules          []string           // hit IDs
+	TailorPlan     string             // "recommended", "always" or "never"
 }
 
 // DefaultPreset is used when .brisk.yaml names none.
@@ -299,6 +309,14 @@ func ResolvePolicy(cfg risk.PolicyConfig) (Policy, error) {
 		}
 		if r.Rules != nil {
 			p.Review.Rules = r.Rules
+		}
+		if r.TailorPlan != nil {
+			switch *r.TailorPlan {
+			case "recommended", "always", "never":
+				p.Review.TailorPlan = *r.TailorPlan
+			default:
+				return Policy{}, fmt.Errorf("agent_review.tailor_plan %q: want recommended, always or never", *r.TailorPlan)
+			}
 		}
 	}
 	return p, nil

@@ -161,6 +161,7 @@ func assessCmd(ctx context.Context, args []string, stdout, stderr io.Writer) (in
 			State:           p.Request.State,
 			Questions:       p.Request.Questions,
 			ReviewQuestions: p.ReviewQuestions,
+			ReviewWhen:      reviewWhen(p),
 			Floor:           p.Finish("rules-only", nil, ""),
 		}
 		return 0, writeJSON(stdout, req)
@@ -176,7 +177,7 @@ func assessCmd(ctx context.Context, args []string, stdout, stderr io.Writer) (in
 		if err != nil {
 			return 0, err
 		}
-		p.ReviewAnswers = h.ReviewAnswers()
+		p.ReviewAnswers, p.ReviewError, p.ReviewUsage = h.ReviewResult()
 		a = p.Finish(backend.Name(), &resp, "")
 	} else {
 		a = p.Answer(ctx, backend)
@@ -244,4 +245,12 @@ func writeText(w io.Writer, a risk.Assessment) {
 		src += ", fell back to rules only: " + a.Provenance.Degraded
 	}
 	fmt.Fprintf(w, "(%s, %d ms)\n", src, a.Provenance.DurationMS)
+}
+
+// reviewWhen tells a harness when to answer the review questions.
+func reviewWhen(p *assess.Prepared) string {
+	if len(p.ReviewQuestions) == 0 {
+		return ""
+	}
+	return p.Policy.TailorPlan()
 }

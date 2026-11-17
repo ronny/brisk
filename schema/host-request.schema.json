@@ -37,6 +37,7 @@
         }
       }
     },
+    "review_when": { "enum": ["recommended", "always"], "description": "Present with review_questions. always: answer them with the main questions. recommended: answer them only if `brisk assess --answers` without review_answers gives agent_review.recommended, then run it again with review_answers." },
     "floor_assessment": { "$ref": "assessment.schema.json" }
   }
 }
