@@ -565,6 +565,19 @@ func (r *Repo) tempIndex(ctx context.Context) (string, func(), error) {
 	if in, err := os.Open(src); err == nil {
 		_, err = io.Copy(f, in)
 		in.Close()
+		if err == nil {
+			err = f.Close()
+		}
+		// Git treats an entry as possibly changed when its file is not
+		// older than the index ("racy git"). A copy with a new mtime would
+		// hide a same-size edit made in the second after the last git add.
+		var info os.FileInfo
+		if err == nil {
+			info, err = os.Stat(src)
+		}
+		if err == nil {
+			err = os.Chtimes(f.Name(), info.ModTime(), info.ModTime())
+		}
 		if err != nil {
 			cleanup()
 			return "", nil, err
