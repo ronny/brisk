@@ -42,7 +42,7 @@ var Questions = map[string]risk.Question{
 		Instructions: "Does this change break a contract other code, clients, or services depend on, such as a public API, RPC or protobuf message, database schema, event payload, configuration format, or command-line flags, without keeping the old form working?" + guard,
 	},
 	// follow_up_fix is the strongest single answer in the recall research
-	// (AUC 0.77 train, 0.74 test on repo A and repo B). It is a
+	// (AUC 0.77 train, 0.74 test on the two evaluation repositories). It is a
 	// calibrated feature of its own, not one of the flags.
 	"follow_up_fix": {
 		Type:         "noul",

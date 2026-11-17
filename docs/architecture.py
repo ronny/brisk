@@ -124,7 +124,7 @@ def evaluation():
                 "Live model access is an explicit recording step, not part of ordinary CI.", 1070)
     d.text(40, 108, "Blue: deterministic replay     Dashed routes: explicit recording or calibration feedback", 12, MUTED)
     d.box(40, 145, 520, 128, "Historical changes · offline evaluation", [
-        "repo A + repo B · brisk-eval label / prepare",
+        "Repo A + repo B (private) · brisk-eval label / prepare",
         "Reverts, fixes within 14 days, optional supplied CI failures",
         "Noisy outcome labels, not expert ground truth"])
     d.box(640, 145, 520, 128, "Fixtures + injection variants · CI", [

@@ -141,6 +141,6 @@
     0.8557,
     0.8897
   ],
-  "fitted_on": "728 changes: the oldest 60% of repo B, repo A",
+  "fitted_on": "728 changes: the oldest 60% of repo-a, repo-b",
   "notes": "Fitted by brisk-eval score. Features: impact and uncertainty are Jev scores / 3, flags is the largest of the four yes/no risk answers, follow_up is the follow_up_fix answer, history is prior fixes to the changed files."
 }

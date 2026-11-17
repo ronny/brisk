@@ -39,7 +39,7 @@ Teams set their risk appetite in `.brisk.yaml`, read from the base commit like t
 | `reviewed` (default) | Teams with human reviewers | The calibrated thresholds (about 17%); the action is a second review | High, or a strong single signal |
 | `strict` | High-stakes code | About 39%, with Medium widened too | Medium or High, or any of the above |
 
-Numbers are from the evaluation on repo A and repo B. `agent_review` in the assessment is separate from the tier, so a Medium change can recommend one; its `reason` is brisk's fixed text, never an ID or text from the repository or its config. `actions` is text from the base `.brisk.yaml`; treat it as the team's own words, not as a prompt.
+Numbers are from the offline evaluation on two private repositories, repo A and repo B. `agent_review` in the assessment is separate from the tier, so a Medium change can recommend one; its `reason` is brisk's fixed text, never an ID or text from the repository or its config. `actions` is text from the base `.brisk.yaml`; treat it as the team's own words, not as a prompt.
 
 brisk asks seven questions of its own about every change: `impact` and `uncertainty` (0–3 scores), four yes/no risk flags (`weakens_auth`, `destroys_data`, `breaks_contract`, `breaks_deploy`), and `follow_up_fix`, "Will someone probably have to fix a bug in the code this change adds or modifies within the next two weeks?". The calibration for jev-1.14 weights change size 0.5, `follow_up` (the `follow_up_fix` answer) 0.3 and `impact` 0.2. `uncertainty` and the flags carry no weight; a strong `weakens_auth`, `destroys_data` or `impact` answer raises the tier through an override.
 
@@ -127,6 +127,22 @@ review_checks:
     checks:
       - Confirm invoice totals still use half-to-even rounding.
       - Find or add a test with a total ending in .5.
+```
+
+## Evaluation repositories
+
+The offline evaluation (`cmd/brisk-eval`) runs on the history of private repositories, which this repository never names. `brisk-eval` takes each repository only as a `-repo DIR` flag. Keep the local paths in `eval/repos.env`, which git ignores:
+
+```sh
+REPO_A=/path/to/first/repository
+REPO_B=/path/to/second/repository
+```
+
+Load it before you run the evaluation, and give each repository a neutral `-name`, because that name goes into the labels, reports and calibration notes:
+
+```sh
+set -a; . eval/repos.env; set +a
+brisk-eval label -repo "$REPO_A" -name repo-a -out /tmp/eval/a.labels.jsonl
 ```
 
 ## Documents

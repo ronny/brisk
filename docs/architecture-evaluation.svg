@@ -20,7 +20,7 @@
 <text x="40" y="108" font-size="12" fill="#526078" font-weight="400" text-anchor="start">Blue: deterministic replay     Dashed routes: explicit recording or calibration feedback</text>
 <rect x="40" y="145" width="520" height="128" rx="8" fill="white" stroke="#aab5c5" stroke-width="1"/>
 <text x="58" y="174" font-size="16" fill="#17243b" font-weight="600" text-anchor="start">Historical changes · offline evaluation</text>
-<text x="58" y="202" font-size="13" fill="#526078" font-weight="400" text-anchor="start">repo A + repo B · brisk-eval label / prepare</text>
+<text x="58" y="202" font-size="13" fill="#526078" font-weight="400" text-anchor="start">Repo A + repo B (private) · brisk-eval label / prepare</text>
 <text x="58" y="224" font-size="13" fill="#526078" font-weight="400" text-anchor="start">Reverts, fixes within 14 days, optional supplied CI failures</text>
 <text x="58" y="246" font-size="13" fill="#526078" font-weight="400" text-anchor="start">Noisy outcome labels, not expert ground truth</text>
 <rect x="640" y="145" width="520" height="128" rx="8" fill="white" stroke="#245bcb" stroke-width="1.7"/>
