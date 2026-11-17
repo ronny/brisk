@@ -1,0 +1,7 @@
+{
+  "id": "jev-1.14",
+  "models": ["jev-1.14"],
+  "weights": { "impact": 0.45, "uncertainty": 0.15, "impact_x_uncertainty": 0.1, "flags": 0.3, "history": 0.0 },
+  "thresholds": { "medium": 0.45, "high": 0.75 },
+  "notes": "Placeholder until the offline evaluation fits it."
+}

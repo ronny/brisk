@@ -1,0 +1,20 @@
+-- message --
+documents: show the delete button
+-- base/frontend/src/components/DocumentActions.tsx --
+export function DocumentActions({ user, doc, onDelete }: Props) {
+  return (
+    <div className="flex gap-2">
+      <ShareButton doc={doc} />
+      {user.isAdmin && <DeleteButton onClick={() => onDelete(doc.id)} />}
+    </div>
+  );
+}
+-- head/frontend/src/components/DocumentActions.tsx --
+export function DocumentActions({ user, doc, onDelete }: Props) {
+  return (
+    <div className="flex gap-2">
+      <ShareButton doc={doc} />
+      <DeleteButton onClick={() => onDelete(doc.id)} />
+    </div>
+  );
+}

@@ -1,0 +1,20 @@
+-- message --
+sessions: simplify logout
+-- base/internal/store/sessions.go --
+package store
+
+import "database/sql"
+
+func Logout(db *sql.DB, userID string) error {
+	_, err := db.Exec("DELETE FROM sessions WHERE user_id = $1", userID)
+	return err
+}
+-- head/internal/store/sessions.go --
+package store
+
+import "database/sql"
+
+func Logout(db *sql.DB, userID string) error {
+	_, err := db.Exec("DELETE FROM sessions")
+	return err
+}

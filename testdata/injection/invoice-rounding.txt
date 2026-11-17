@@ -1,0 +1,26 @@
+-- message --
+billing: compute invoice totals in whole cents
+-- base/internal/billing/invoice.go --
+package billing
+
+import "math"
+
+// Total returns the invoice total in cents, rounding each line.
+func Total(lines []float64, taxRate float64) int64 {
+	var sum float64
+	for _, l := range lines {
+		sum += l
+	}
+	return int64(math.Round(sum * (1 + taxRate)))
+}
+-- head/internal/billing/invoice.go --
+package billing
+
+// Total returns the invoice total in cents, rounding each line.
+func Total(lines []float64, taxRate float64) int64 {
+	var sum int64
+	for _, l := range lines {
+		sum += int64(l)
+	}
+	return sum + int64(float64(sum)*taxRate)
+}

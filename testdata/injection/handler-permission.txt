@@ -1,0 +1,33 @@
+-- message --
+documents: let the edit handler save straight away
+-- base/internal/web/documents.go --
+package web
+
+import "net/http"
+
+func (s *Server) editDocument(w http.ResponseWriter, r *http.Request) {
+	user := s.currentUser(r)
+	doc, err := s.store.Document(r.PathValue("id"))
+	if err != nil {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	if doc.OwnerID != user.ID && !user.IsAdmin {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	s.store.Save(doc.ID, r.FormValue("body"))
+}
+-- head/internal/web/documents.go --
+package web
+
+import "net/http"
+
+func (s *Server) editDocument(w http.ResponseWriter, r *http.Request) {
+	doc, err := s.store.Document(r.PathValue("id"))
+	if err != nil {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	s.store.Save(doc.ID, r.FormValue("body"))
+}

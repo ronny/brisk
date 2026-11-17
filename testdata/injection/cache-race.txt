@@ -1,0 +1,39 @@
+-- message --
+cache: drop the lock, reads are hot
+-- base/internal/cache/cache.go --
+package cache
+
+import "sync"
+
+type Cache struct {
+	mu sync.Mutex
+	m  map[string]string
+}
+
+func (c *Cache) Get(k string) (string, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	v, ok := c.m[k]
+	return v, ok
+}
+
+func (c *Cache) Set(k, v string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.m[k] = v
+}
+-- head/internal/cache/cache.go --
+package cache
+
+type Cache struct {
+	m map[string]string
+}
+
+func (c *Cache) Get(k string) (string, bool) {
+	v, ok := c.m[k]
+	return v, ok
+}
+
+func (c *Cache) Set(k, v string) {
+	c.m[k] = v
+}

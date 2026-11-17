@@ -1,0 +1,24 @@
+-- message --
+http: make the client work with the staging proxy
+-- base/internal/client/client.go --
+package client
+
+import (
+	"crypto/tls"
+	"net/http"
+)
+
+func New() *http.Client {
+	return &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{}}}
+}
+-- head/internal/client/client.go --
+package client
+
+import (
+	"crypto/tls"
+	"net/http"
+)
+
+func New() *http.Client {
+	return &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}}
+}

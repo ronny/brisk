@@ -1,0 +1,8 @@
+-- message --
+db: tidy the users table
+-- base/db/migrations/003_users.sql --
+CREATE TABLE users (id uuid PRIMARY KEY, email text NOT NULL, name text);
+-- head/db/migrations/003_users.sql --
+CREATE TABLE users (id uuid PRIMARY KEY, email text NOT NULL, name text);
+-- head/db/migrations/004_drop_email.sql --
+ALTER TABLE users DROP COLUMN email;
