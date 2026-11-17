@@ -321,10 +321,10 @@ func (p *Prepared) Finish(backend string, resp *risk.Response, degraded string) 
 			a.Provenance.ModelRisk = &shown
 			a.Impact = round2(feats["impact"] * 3)
 			a.Uncertainty = round2(feats["uncertainty"] * 3)
-			modelTier, _ := ModelTier(table, r, resp.Answers)
+			modelTier, fired := ModelTier(table, r, resp.Answers)
 			a.Tier = risk.Max(p.Floor, modelTier)
 			if modelTier > risk.Low {
-				candidates = append(candidates, modelReasons(resp.Answers, modelTier)...)
+				candidates = append(candidates, modelReasons(table, feats, r, resp.Answers, fired, a.Stats)...)
 			}
 		} else {
 			a.Provenance.Degraded = "calibration: " + err.Error()
@@ -347,25 +347,81 @@ func (p *Prepared) Finish(backend string, resp *risk.Response, degraded string) 
 	return a
 }
 
-func modelReasons(answers map[string]risk.Answer, tier risk.Tier) []risk.Reason {
+// modelReasons explains the model's part of the tier with only what raised
+// it: each override that fired, and, when the weighted risk alone reached a
+// tier, the features that make up at least a quarter of that risk. Answers
+// that changed nothing, such as a yes/no answer below its override, are not
+// shown; they stay in provenance.answers.
+func modelReasons(t *calibration.Table, feats map[string]float64, risk01 float64, answers map[string]risk.Answer, fired []calibration.Override, stats risk.Stats) []risk.Reason {
 	var out []risk.Reason
-	names := make([]string, 0, len(flagText))
-	for n := range flagText {
-		names = append(names, n)
+	seen := map[string]bool{}
+	for _, o := range fired {
+		if seen[o.Question] {
+			continue
+		}
+		seen[o.Question] = true
+		tier, _ := risk.ParseTier(o.Tier)
+		out = append(out, risk.Reason{Text: answerText(o.Question, answers), Source: "question", ID: o.Question, Tier: tier})
 	}
-	sort.Slice(names, func(i, j int) bool { return noul(answers[names[i]]) > noul(answers[names[j]]) })
-	for _, n := range names {
-		if v := noul(answers[n]); v >= 0.5 {
-			out = append(out, risk.Reason{Text: fmt.Sprintf("%s (model: %.2f)", flagText[n], v), Source: "question", ID: n, Tier: tier})
+	riskTier, _ := ModelTier(&calibration.Table{Thresholds: t.Thresholds}, risk01, nil)
+	if riskTier == risk.Low || risk01 <= 0 {
+		return out
+	}
+	type part struct {
+		name  string
+		share float64
+	}
+	var parts []part
+	for name, w := range t.Weights {
+		if c := w * feats[name]; c >= 0.25*risk01 {
+			parts = append(parts, part{name, c / risk01})
 		}
 	}
-	if a, ok := answers["impact"]; ok && a.Score != nil && *a.Score >= 1.5 {
-		out = append(out, risk.Reason{Text: fmt.Sprintf("High impact if wrong (model: %.1f of 3)", *a.Score), Source: "question", ID: "impact", Tier: tier})
+	sort.Slice(parts, func(i, j int) bool { return parts[i].share > parts[j].share })
+	add := func(id, text string) {
+		if !seen[id] {
+			seen[id] = true
+			out = append(out, risk.Reason{Text: text, Source: "question", ID: id, Tier: riskTier})
+		}
 	}
-	if a, ok := answers["uncertainty"]; ok && a.Score != nil && *a.Score >= 1.5 {
-		out = append(out, risk.Reason{Text: fmt.Sprintf("Weakly verified (model: %.1f of 3)", *a.Score), Source: "question", ID: "uncertainty", Tier: tier})
+	for _, p := range parts {
+		switch p.name {
+		case "size":
+			add("size", fmt.Sprintf("Large change: +%d -%d lines across %d files", stats.Additions, stats.Deletions, stats.Files))
+		case "history":
+			add("history", "The changed files were fixed or reverted often before")
+		case "impact", "uncertainty":
+			add(p.name, answerText(p.name, answers))
+		case "impact_x_uncertainty":
+			add("impact", answerText("impact", answers))
+			add("uncertainty", answerText("uncertainty", answers))
+		case "flags":
+			best, v := "", 0.0
+			for n := range flagText {
+				if x := noul(answers[n]); x > v || x == v && n < best {
+					best, v = n, x
+				}
+			}
+			if best != "" {
+				add(best, answerText(best, answers))
+			}
+		}
 	}
 	return out
+}
+
+// answerText describes one answer for a reason.
+func answerText(q string, answers map[string]risk.Answer) string {
+	a := answers[q]
+	switch {
+	case q == "impact" && a.Score != nil:
+		return fmt.Sprintf("High impact if wrong (model: %.1f of 3)", *a.Score)
+	case q == "uncertainty" && a.Score != nil:
+		return fmt.Sprintf("Weakly verified (model: %.1f of 3)", *a.Score)
+	case flagText[q] != "":
+		return fmt.Sprintf("%s (model: %.2f)", flagText[q], noul(a))
+	}
+	return q
 }
 
 func noul(a risk.Answer) float64 {

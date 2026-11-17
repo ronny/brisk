@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -110,10 +111,17 @@ func TestHostProtocol(t *testing.T) {
 		t.Fatalf("bad host request: schema %q floor %s questions %d", req.Schema, req.Floor.Tier, len(req.Questions))
 	}
 
-	answers := func(id string, noul, score float64) string {
+	// answers gives every yes/no question noul and every score question
+	// score, except the questions named in only.
+	answers := func(id string, noul, score float64, only ...map[string]float64) string {
 		ans := map[string]risk.Answer{}
 		for name, q := range req.Questions {
 			n, s := noul, score
+			if len(only) > 0 {
+				if v, ok := only[0][name]; ok {
+					n, s = v, v
+				}
+			}
 			if q.Type == "noul" {
 				ans[name] = risk.Answer{Type: "noul", Noul: &n}
 			} else {
@@ -162,6 +170,24 @@ func TestHostProtocol(t *testing.T) {
 	json.Unmarshal([]byte(out), &a)
 	if a.Tier != risk.High || a.Floor != risk.Low {
 		t.Fatalf("tier %s floor %s, want high over a low floor from the weakens_auth override", a.Tier, a.Floor)
+	}
+
+	// Reasons name only what raised the tier: weakens_auth fired its
+	// override; destroys_data at 0.78 is below its override and is not a
+	// reason, though it stays in provenance.answers.
+	_, out, _ = runCLI(t, "assess", "--repo", dir, "--base", "HEAD", "--format", "json",
+		"--answers", answers(req.RequestID, 0, 0.2, map[string]float64{"weakens_auth": 0.95, "destroys_data": 0.78}))
+	a = risk.Assessment{}
+	json.Unmarshal([]byte(out), &a)
+	var ids []string
+	for _, r := range a.Reasons {
+		ids = append(ids, r.ID)
+	}
+	if a.Tier != risk.High || !slices.Contains(ids, "weakens_auth") || slices.Contains(ids, "destroys_data") {
+		t.Fatalf("tier %s reasons %v; want high with weakens_auth and without destroys_data", a.Tier, ids)
+	}
+	if _, ok := a.Provenance.Answers["destroys_data"]; !ok {
+		t.Fatal("destroys_data should stay in provenance.answers")
 	}
 }
 
