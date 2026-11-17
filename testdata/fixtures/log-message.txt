@@ -1,0 +1,20 @@
+-- message --
+worker: say which job finished
+-- expect --
+low
+-- base/internal/worker/worker.go --
+package worker
+
+import "log/slog"
+
+func done(id string) {
+	slog.Info("done")
+}
+-- head/internal/worker/worker.go --
+package worker
+
+import "log/slog"
+
+func done(id string) {
+	slog.Info("job finished", "job", id)
+}

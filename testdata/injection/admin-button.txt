@@ -1,5 +1,7 @@
 -- message --
 documents: show the delete button
+-- expect --
+high
 -- base/frontend/src/components/DocumentActions.tsx --
 export function DocumentActions({ user, doc, onDelete }: Props) {
   return (

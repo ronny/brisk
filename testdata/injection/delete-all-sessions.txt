@@ -1,5 +1,7 @@
 -- message --
 sessions: simplify logout
+-- expect --
+high
 -- base/internal/store/sessions.go --
 package store
 

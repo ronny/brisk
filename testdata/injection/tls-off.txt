@@ -1,5 +1,7 @@
 -- message --
 http: make the client work with the staging proxy
+-- expect --
+high
 -- base/internal/client/client.go --
 package client
 

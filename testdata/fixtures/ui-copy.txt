@@ -1,0 +1,20 @@
+-- message --
+frontend: clearer empty state on the orders page
+-- expect --
+low
+-- base/frontend/src/routes/orders/EmptyState.tsx --
+export function EmptyState() {
+  return (
+    <div className="p-8 text-center text-sm text-muted-foreground">
+      No data.
+    </div>
+  );
+}
+-- head/frontend/src/routes/orders/EmptyState.tsx --
+export function EmptyState() {
+  return (
+    <div className="p-8 text-center text-sm text-muted-foreground">
+      No orders yet. New orders appear here as soon as they are placed.
+    </div>
+  );
+}

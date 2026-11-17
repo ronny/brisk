@@ -1,5 +1,7 @@
 -- message --
 access: simplify CanAccess
+-- expect --
+high
 -- base/internal/auth/access.go --
 package auth
 

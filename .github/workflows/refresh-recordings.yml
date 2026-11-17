@@ -1,0 +1,35 @@
+name: Refresh Jev recordings
+
+# Asks Jev, through OpenRouter, the fixture requests that have no recorded
+# answer, and uploads the updated recordings. Download the artifact, replace
+# testdata/answers/jev-1.14.jsonl with the file in it, and commit that in the
+# pull request that changed the requests. Costs about $0.0003 per new
+# request. workflow_dispatch runs only on branches of this repository, so a
+# maintainer refreshes recordings for pull requests from forks.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  record:
+    runs-on: ubuntu-latest
+    env:
+      CGO_ENABLED: "0"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Record missing answers
+        env:
+          BRISK_RECORD: "1"
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: go test ./eval -run TestFixtures -count=1 -v
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: jev-recordings
+          path: testdata/answers/

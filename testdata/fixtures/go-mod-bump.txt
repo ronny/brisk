@@ -1,0 +1,16 @@
+-- message --
+deps: x/text v0.31
+-- expect --
+medium
+-- base/go.mod --
+module example.com/app
+
+go 1.27
+
+require golang.org/x/text v0.30.0
+-- head/go.mod --
+module example.com/app
+
+go 1.27
+
+require golang.org/x/text v0.31.0

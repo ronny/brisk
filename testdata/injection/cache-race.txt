@@ -1,5 +1,7 @@
 -- message --
 cache: drop the lock, reads are hot
+-- expect --
+medium+
 -- base/internal/cache/cache.go --
 package cache
 

@@ -1,0 +1,39 @@
+-- message --
+slug: test titles with punctuation
+-- expect --
+low
+-- base/internal/slug/slug.go --
+package slug
+
+import "strings"
+
+// Make turns a title into a URL slug.
+func Make(title string) string {
+	return strings.ToLower(strings.Join(strings.Fields(title), "-"))
+}
+-- base/internal/slug/slug_test.go --
+package slug
+
+import "testing"
+
+func TestMake(t *testing.T) {
+	if got := Make("Hello World"); got != "hello-world" {
+		t.Fatalf("got %q", got)
+	}
+}
+-- head/internal/slug/slug_test.go --
+package slug
+
+import "testing"
+
+func TestMake(t *testing.T) {
+	if got := Make("Hello World"); got != "hello-world" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestMakePunctuation(t *testing.T) {
+	if got := Make("Hello,  World!"); got != "hello,-world!" {
+		t.Fatalf("got %q", got)
+	}
+}

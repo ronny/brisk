@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  go:
+    runs-on: ubuntu-latest
+    env:
+      CGO_ENABLED: "0"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: gofmt
+        run: |
+          out=$(gofmt -l $(git ls-files '*.go'))
+          if [ -n "$out" ]; then echo "Not gofmt-formatted:"; echo "$out"; exit 1; fi
+      - run: go vet ./...
+      # Includes eval.TestFixtures, which replays the recorded Jev answers in
+      # testdata/answers/ for every fixture: no network, no key, no cost. It
+      # fails when a change alters what brisk sends to Jev; refresh the
+      # recordings with the "Refresh Jev recordings" workflow.
+      - run: go test ./...
+      - name: Build static binaries
+        run: |
+          go build -trimpath -o dist/brisk ./cmd/brisk
+          go build -trimpath -o dist/brisk-eval ./cmd/brisk-eval
+          file dist/brisk | grep -q 'statically linked'
+
+  amp-plugin:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: adapters/amp
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - run: bun test
+      - run: bunx tsc --noEmit

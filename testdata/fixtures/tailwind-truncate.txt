@@ -1,0 +1,14 @@
+-- message --
+frontend: truncate long product names in the list
+-- expect --
+low
+-- note --
+Regression: the Tailwind class "truncate" once matched the destructive SQL rule.
+-- base/frontend/src/components/ProductRow.tsx --
+export function ProductRow({ name }: { name: string }) {
+  return <td className="font-medium">{name}</td>;
+}
+-- head/frontend/src/components/ProductRow.tsx --
+export function ProductRow({ name }: { name: string }) {
+  return <td className={cn("truncate font-medium", "max-w-64")}>{name}</td>;
+}

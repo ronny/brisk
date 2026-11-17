@@ -1,0 +1,14 @@
+-- message --
+db: add the audit table, with its down migration
+-- expect --
+medium
+-- note --
+Regression: a down migration that drops what its up file creates once set High.
+-- base/db/migrations/001_orders.sql --
+CREATE TABLE orders (id uuid PRIMARY KEY);
+-- head/db/migrations/001_orders.sql --
+CREATE TABLE orders (id uuid PRIMARY KEY);
+-- head/db/migrations/002_audit.up.sql --
+CREATE TABLE audit (id bigserial PRIMARY KEY, at timestamptz NOT NULL DEFAULT now(), what text NOT NULL);
+-- head/db/migrations/002_audit.down.sql --
+DROP TABLE audit;

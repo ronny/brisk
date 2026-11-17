@@ -1,0 +1,20 @@
+-- message --
+deps: react 19.2
+-- expect --
+medium
+-- base/frontend/package.json --
+{
+  "name": "frontend",
+  "dependencies": {
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  }
+}
+-- head/frontend/package.json --
+{
+  "name": "frontend",
+  "dependencies": {
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  }
+}

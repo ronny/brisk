@@ -1,0 +1,17 @@
+-- message --
+client: remove the old Fetch helper
+-- expect --
+medium+
+-- base/pkg/client/client.go --
+package client
+
+// Fetch gets a document by ID. Deprecated: use Get.
+func Fetch(id string) (Doc, error) { return Get(id) }
+
+// Get gets a document by ID.
+func Get(id string) (Doc, error) { return Doc{ID: id}, nil }
+-- head/pkg/client/client.go --
+package client
+
+// Get gets a document by ID.
+func Get(id string) (Doc, error) { return Doc{ID: id}, nil }

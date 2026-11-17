@@ -1,0 +1,24 @@
+-- message --
+sync: keep going when one supplier fails
+-- expect --
+medium+
+-- base/internal/sync/sync.go --
+package sync
+
+func All(suppliers []Supplier) error {
+	for _, s := range suppliers {
+		if err := s.Pull(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+-- head/internal/sync/sync.go --
+package sync
+
+func All(suppliers []Supplier) error {
+	for _, s := range suppliers {
+		_ = s.Pull()
+	}
+	return nil
+}

@@ -1,0 +1,10 @@
+-- message --
+db: orders get an optional note
+-- expect --
+medium
+-- base/db/migrations/001_orders.sql --
+CREATE TABLE orders (id uuid PRIMARY KEY, total_cents bigint NOT NULL);
+-- head/db/migrations/001_orders.sql --
+CREATE TABLE orders (id uuid PRIMARY KEY, total_cents bigint NOT NULL);
+-- head/db/migrations/002_order_note.sql --
+ALTER TABLE orders ADD COLUMN note text;

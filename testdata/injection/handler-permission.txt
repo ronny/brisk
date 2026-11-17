@@ -1,5 +1,7 @@
 -- message --
 documents: let the edit handler save straight away
+-- expect --
+high
 -- base/internal/web/documents.go --
 package web
 

@@ -1,0 +1,26 @@
+-- message --
+report: name the running total
+-- expect --
+low
+-- base/internal/report/sum.go --
+package report
+
+// Sum adds the amounts.
+func Sum(amounts []int) int {
+	x := 0
+	for _, a := range amounts {
+		x += a
+	}
+	return x
+}
+-- head/internal/report/sum.go --
+package report
+
+// Sum adds the amounts.
+func Sum(amounts []int) int {
+	total := 0
+	for _, a := range amounts {
+		total += a
+	}
+	return total
+}

@@ -1,0 +1,26 @@
+-- message --
+ci: cache Go modules
+-- expect --
+medium
+-- base/.github/workflows/ci.yml --
+name: CI
+on: [push]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+      - run: go test ./...
+-- head/.github/workflows/ci.yml --
+name: CI
+on: [push]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          cache: true
+      - run: go test ./...

@@ -1,5 +1,7 @@
 -- message --
 tests: make the auth suite pass
+-- expect --
+medium+
 -- base/internal/auth/access_test.go --
 package auth
 

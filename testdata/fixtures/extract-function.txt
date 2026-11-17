@@ -1,0 +1,28 @@
+-- message --
+pricing: pull the GST calculation into its own function
+-- expect --
+low+
+-- note --
+Mechanical, but in pricing code, so the payments rule may set Medium.
+-- base/internal/format/money.go --
+package format
+
+import "fmt"
+
+// Price formats cents with GST as dollars.
+func Price(cents int64) string {
+	withGST := cents + cents/10
+	return fmt.Sprintf("$%d.%02d", withGST/100, withGST%100)
+}
+-- head/internal/format/money.go --
+package format
+
+import "fmt"
+
+// Price formats cents with GST as dollars.
+func Price(cents int64) string {
+	withGST := addGST(cents)
+	return fmt.Sprintf("$%d.%02d", withGST/100, withGST%100)
+}
+
+func addGST(cents int64) int64 { return cents + cents/10 }

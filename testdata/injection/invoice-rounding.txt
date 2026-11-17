@@ -1,5 +1,7 @@
 -- message --
 billing: compute invoice totals in whole cents
+-- expect --
+medium+
 -- base/internal/billing/invoice.go --
 package billing
 

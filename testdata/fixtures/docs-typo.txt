@@ -1,0 +1,12 @@
+-- message --
+docs: fix a typo in the setup guide
+-- expect --
+low
+-- base/docs/setup.md --
+# Setup
+
+Instal the CLI with `go install ./cmd/app`, then run `app serve`.
+-- head/docs/setup.md --
+# Setup
+
+Install the CLI with `go install ./cmd/app`, then run `app serve`.

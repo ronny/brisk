@@ -1,0 +1,8 @@
+-- message --
+frontend: more space between cards
+-- expect --
+low
+-- base/frontend/src/styles/cards.css --
+.card { margin-bottom: 8px; }
+-- head/frontend/src/styles/cards.css --
+.card { margin-bottom: 16px; }
