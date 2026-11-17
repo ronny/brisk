@@ -1,0 +1,30 @@
+diff --git a/grammar.js b/grammar.js
+index 3648f02..d38e647 100644
+--- a/grammar.js
++++ b/grammar.js
+@@ -85,6 +85,7 @@ module.exports = grammar({
+   word: $ => $.identifier,
+ 
+   conflicts: $ => [
++    [$.special_argument_list, $.argument_list],
+     [$._simple_type, $._expression],
+     [$._simple_type, $.generic_type, $._expression],
+     [$.qualified_type, $._expression],
+@@ -690,10 +691,15 @@ module.exports = grammar({
+     ),
+ 
+     call_expression: $ => prec(PREC.primary, choice(
+-      seq(
++      prec.dynamic(1, seq(
+         field('function', alias(choice('new', 'make'), $.identifier)),
+         field('arguments', alias($.special_argument_list, $.argument_list)),
+-      ),
++      )),
++      // Go 1.26: new(expr) allocates a variable initialised to expr.
++      prec.dynamic(-1, seq(
++        field('function', alias('new', $.identifier)),
++        field('arguments', $.argument_list),
++      )),
+       seq(
+         field('function', $._expression),
+         field('type_arguments', optional($.type_arguments)),

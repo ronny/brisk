@@ -3,7 +3,9 @@
 # version below changes; the committed .wasm is what `go build` embeds, so
 # building brisk itself needs no C toolchain.
 #
-# Needs zig (https://ziglang.org) on PATH, or `pip install ziglang==$ZIG_VERSION`
+# Needs network access, curl, patch, node with npm (for tree-sitter-cli, whose
+# install script downloads its binary, so npm must not set ignore-scripts),
+# and zig (https://ziglang.org) on PATH, or `pip install ziglang==$ZIG_VERSION`
 # and ZIG="python3 -m ziglang".
 set -euo pipefail
 
@@ -11,6 +13,7 @@ TREE_SITTER=v0.27.2
 TREE_SITTER_GO=v0.25.0
 TREE_SITTER_TYPESCRIPT=v0.23.2
 ZIG_VERSION=0.17.1
+TREE_SITTER_CLI=0.25.8 # regenerates tree-sitter-go after the patch; needs node
 ZIG=${ZIG:-zig}
 
 here=$(cd "$(dirname "$0")" && pwd)
@@ -26,6 +29,13 @@ fetch() { # repo tag
 fetch tree-sitter "$TREE_SITTER"
 fetch tree-sitter-go "$TREE_SITTER_GO"
 fetch tree-sitter-typescript "$TREE_SITTER_TYPESCRIPT"
+
+# Go 1.26 allows new(expr); upstream tree-sitter-go only parses new(Type).
+# tree-sitter-cli $TREE_SITTER_CLI regenerates upstream's parser.c byte for
+# byte without the patch, so the patched parser is reproducible.
+patch --batch --fuzz=0 -d "$work/tree-sitter-go" -p1 <"$here/tree-sitter-go-new-expr.patch"
+npm install --silent --no-save --prefix "$work/cli" "tree-sitter-cli@$TREE_SITTER_CLI"
+(cd "$work/tree-sitter-go" && "$work/cli/node_modules/.bin/tree-sitter" generate)
 
 have=$($ZIG version)
 if [ "$have" != "$ZIG_VERSION" ]; then
@@ -46,7 +56,7 @@ $ZIG cc --target=wasm32-wasi-musl -mexec-model=reactor -O2 -fno-sanitize=undefin
 
 cat >"$out/VERSIONS" <<EOF
 tree-sitter $TREE_SITTER
-tree-sitter-go $TREE_SITTER_GO
+tree-sitter-go $TREE_SITTER_GO + tree-sitter-go-new-expr.patch (tree-sitter-cli $TREE_SITTER_CLI)
 tree-sitter-typescript $TREE_SITTER_TYPESCRIPT
 zig $have
 EOF

@@ -219,6 +219,7 @@ type pair struct {
 	lang     string
 	fc       risk.FileChange
 	out      []risk.Finding
+	authed   once // functions already given an auth_logic_changed finding
 }
 
 func load(ctx context.Context, fc risk.FileChange, l tswasm.Lang, name string) (*pair, error) {
@@ -230,7 +231,7 @@ func load(ctx context.Context, fc risk.FileChange, l tswasm.Lang, name string) (
 		return nil, nil
 	}
 	oldRows, newRows := changedRows(fc)
-	p := &pair{lang: name, fc: fc}
+	p := &pair{lang: name, fc: fc, authed: once{}}
 	var err error
 	if fc.Status != risk.Added && len(fc.Old) > 0 {
 		path := fc.OldPath
@@ -274,7 +275,7 @@ func (p *pair) parseErrors() {
 			if n.Missing() {
 				what = fmt.Sprintf("a missing %q", f.kind(int32(i)))
 			}
-			p.add(risk.ParseError, f, int32(i), "", fmt.Sprintf("The changed code has %s, so it may not compile.", what))
+			p.add(risk.ParseError, f, int32(i), "", fmt.Sprintf("brisk could not parse the changed code (%s): it may not compile, or it uses syntax the parser does not know.", what))
 			return
 		}
 	}
@@ -348,7 +349,7 @@ var authPath = regexp.MustCompile(`(?i)(^|/)(auth|authz|authn|permissions?|acl|r
 // authChanges reports, once per function and preferring the new file, a changed check, condition, or
 // return (hit) inside a function whose name or file suggests auth code.
 func (p *pair) authChanges(hit func(*file, int32) bool, symbol func(*file, int32) string) {
-	done := once{}
+	done := p.authed
 	for _, f := range []*file{p.new, p.old} {
 		if f == nil {
 			continue
@@ -367,6 +368,131 @@ func (p *pair) authChanges(hit func(*file, int32) bool, symbol func(*file, int32
 				detail = fmt.Sprintf("Removes or rewrites a check, condition, or return in %s, which looks like auth code.", sym)
 			}
 			p.add(risk.AuthLogicChanged, f, i, sym, detail)
+		}
+	}
+}
+
+var (
+	// accessFlag matches admin, role, and permission checks such as
+	// user.IsAdmin, hasPermission(...), canEdit, or role === "admin".
+	accessFlag = regexp.MustCompile(`(?i)\b(is_?(admin|superuser|super_?admin|staff|owner|moderator)|has_?(roles?|permissions?|perms?|access|scopes?)|can_?(edit|delete|view|manage|access|admin))\b` +
+		`|(?i)\broles?\b[^&|]{0,40}\b(admin|owner|superuser)\b`)
+	// idLike is an identifier that holds an ID, such as doc.OwnerID or userId.
+	idLike = regexp.MustCompile(`(^|[._])(id|ID|Id)$|[a-z0-9](ID|Id)$|_id$`)
+	// whoseID names the subject of an ID comparison.
+	whoseID = regexp.MustCompile(`(?i)(owner|user|author|creator|account|tenant|org|member|customer)`)
+	// denies matches code that refuses access: status constants and error
+	// identifiers, not free text such as "forbidden characters".
+	denies = regexp.MustCompile(`StatusForbidden|StatusUnauthorized|\b(401|403)\b|codes\.(PermissionDenied|Unauthenticated)|ErrPermission|PermissionDenied|Forbidden(Error|Exception)?\b|Unauthori[sz]ed(Error|Exception)\b|ErrUnauthori[sz]ed|ErrForbidden`)
+	// responseStatus matches a condition that reads a response or error
+	// status: a client handling 401, not a server refusing.
+	responseStatus = regexp.MustCompile(`(?i)status_?code|\.status\b|\bstatus\s*[!=]==?|\.code\s*[!=]==?`)
+	// emptyBranch is a ternary branch that renders nothing.
+	emptyBranch = regexp.MustCompile(`^(null|undefined|false|nil|""|''|<></>)$`)
+)
+
+// accessCondition reports whether the expression at i tests an admin, role,
+// or permission flag, or (with ids) compares owner or user IDs.
+func accessCondition(f *file, i int32, ids bool) bool {
+	if i < 0 {
+		return false
+	}
+	if accessFlag.MatchString(f.text(i)) {
+		return true
+	}
+	if !ids {
+		return false
+	}
+	for k := i; k < f.end[i]; k++ {
+		if f.kind(k) != "binary_expression" {
+			continue
+		}
+		switch f.text(f.field(k, "operator")) {
+		case "==", "!=", "===", "!==":
+		default:
+			continue
+		}
+		l, r := f.text(f.field(k, "left")), f.text(f.field(k, "right"))
+		if idLike.MatchString(l) && idLike.MatchString(r) && (whoseID.MatchString(l) || whoseID.MatchString(r)) {
+			return true
+		}
+	}
+	return false
+}
+
+// access describes the access check at node i, wherever it is, and returns
+// the node holding its condition, or ("", -1). It recognises:
+//   - if statements that test an admin, role, or permission flag, or that
+//     compare owner or user IDs and refuse access in a short branch;
+//   - short if branches that refuse access with 401, 403, or Forbidden,
+//     unless the condition reads a response status;
+//   - && guards on a flag, such as JSX {user.isAdmin && <Delete />};
+//   - ternaries on a flag, or on an ID comparison with an empty branch,
+//     such as {doc.authorId === user.id ? <Edit /> : null}.
+//
+// ID equality alone is not enough: it is as often a lookup or a style
+// choice as an ownership check.
+func access(f *file, i int32) (string, int32) {
+	switch f.kind(i) {
+	case "if_statement":
+		cond, body := f.field(i, "condition"), f.field(i, "consequence")
+		if cond < 0 {
+			return "", -1
+		}
+		refuses := body >= 0 && f.t.Nodes[body].EndRow-f.t.Nodes[body].StartRow <= 6 && denies.MatchString(f.text(body))
+		if accessCondition(f, cond, refuses) {
+			return fmt.Sprintf("an access check (%s)", short(f.text(cond))), cond
+		}
+		if refuses && !responseStatus.MatchString(f.text(cond)) {
+			return fmt.Sprintf("a check that refuses access (%s)", short(f.text(cond))), cond
+		}
+	case "binary_expression":
+		left := f.field(i, "left")
+		if left < 0 || f.text(f.field(i, "operator")) != "&&" {
+			return "", -1
+		}
+		if p := f.parent(i); p >= 0 && f.kind(p) == "binary_expression" && f.text(f.field(p, "operator")) == "&&" {
+			return "", -1 // report the outermost && once
+		}
+		if accessCondition(f, left, false) {
+			return fmt.Sprintf("an access guard (%s)", short(f.text(left))), left
+		}
+	case "ternary_expression":
+		cond := f.field(i, "condition")
+		gates := emptyBranch.MatchString(f.text(f.field(i, "consequence"))) || emptyBranch.MatchString(f.text(f.field(i, "alternative")))
+		if accessCondition(f, cond, gates) {
+			return fmt.Sprintf("an access check (%s)", short(f.text(cond))), cond
+		}
+	}
+	return "", -1
+}
+
+// accessChanges runs before authChanges, so its more specific finding wins
+// for a function both would report. It reports, once per function, access checks in the old file
+// that the change removed or rewrote. A check whose condition survives
+// unchanged in the new file (re-indented, moved, or with other edits on its
+// line) is not reported, and checks that only exist in the new file are new
+// code, not weakened code.
+func (p *pair) accessChanges(symbol func(*file, int32) string) {
+	if p.old == nil {
+		return
+	}
+	kept := map[string]bool{}
+	if f := p.new; f != nil {
+		for i := int32(0); i < int32(len(f.t.Nodes)); i++ {
+			if what, cond := access(f, i); what != "" {
+				kept[f.all(cond)] = true
+			}
+		}
+	}
+	f, done := p.old, p.authed
+	for i := int32(0); i < int32(len(f.t.Nodes)); i++ {
+		what, cond := access(f, i)
+		if what == "" || kept[f.all(cond)] || !(f.startChanged(i) || f.touches(cond)) {
+			continue
+		}
+		if sym := symbol(f, i); done.first(sym) {
+			p.add(risk.AuthLogicChanged, f, i, sym, fmt.Sprintf("Removes or changes %s in %s.", what, orFile(sym)))
 		}
 	}
 }

@@ -235,6 +235,74 @@ func Controller() int {
 			[]string{"auth_logic_changed canonical @12"}},
 	})
 
+	const handler = `package web
+
+import "net/http"
+
+func (s *Server) editDocument(w http.ResponseWriter, r *http.Request) {
+	user := s.currentUser(r)
+	doc, err := s.store.Document(r.PathValue("id"))
+	if err != nil {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	if doc.OwnerID != user.ID && !user.IsAdmin {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "method", http.StatusMethodNotAllowed)
+		return
+	}
+	if doc.Title == "" || user.Name == "" {
+		return
+	}
+	if !s.limiter.Allow() {
+		http.Error(w, "denied", http.StatusForbidden)
+		return
+	}
+	s.store.Save(doc.ID, r.FormValue("body"))
+}
+`
+	run(t, []tc{
+		// Thread A's testdata/injection/handler-permission.txt.
+		{"ownership check removed from a handler", "internal/web/documents.go", handler,
+			strings.Replace(strings.Replace(handler, "\tuser := s.currentUser(r)\n", "", 1),
+				"\tif doc.OwnerID != user.ID && !user.IsAdmin {\n\t\thttp.Error(w, \"forbidden\", http.StatusForbidden)\n\t\treturn\n\t}\n", "", 1),
+			[]string{"auth_logic_changed (*Server).editDocument @12"}},
+		{"ownership check weakened", "internal/web/documents.go", handler,
+			strings.Replace(handler, "doc.OwnerID != user.ID && !user.IsAdmin", "doc.OwnerID != user.ID && false", 1),
+			[]string{"auth_logic_changed (*Server).editDocument @12"}},
+		{"branch that returns 403 removed", "internal/web/documents.go", handler,
+			strings.Replace(handler, "\tif !s.limiter.Allow() {\n\t\thttp.Error(w, \"denied\", http.StatusForbidden)\n\t\treturn\n\t}\n", "", 1),
+			[]string{"auth_logic_changed (*Server).editDocument @23"}},
+		{"method check removed is not access", "internal/web/documents.go", handler,
+			strings.Replace(handler, "\tif r.Method != http.MethodPost {\n\t\thttp.Error(w, \"method\", http.StatusMethodNotAllowed)\n\t\treturn\n\t}\n", "", 1),
+			nil},
+		{"validation on user fields is not access", "internal/web/documents.go", handler,
+			strings.Replace(handler, `doc.Title == "" || user.Name == ""`, `doc.Title == ""`, 1),
+			nil},
+		{"client checking a response for 401 is not access", "cmd/check.go",
+			"package main\n\nfunc check(resp *http.Response) error {\n\tif resp.StatusCode == http.StatusUnauthorized {\n\t\treturn errors.New(\"unauthorized\")\n\t}\n\treturn nil\n}\n",
+			"package main\n\nfunc check(resp *http.Response) error {\n\treturn nil\n}\n", nil},
+		{"ID equality in a lookup is not access", "server/channels/store/storetest/reaction_store.go",
+			"package storetest\n\nfunc saved(rs []*Reaction, r *Reaction) bool {\n\tfor _, got := range rs {\n\t\tsame := got.UserId == r.UserId && got.PostId == r.PostId && got.EmojiName == r.EmojiName\n\t\tuse(same)\n\t}\n\treturn false\n}\n",
+			"package storetest\n\nfunc saved(rs []*Reaction, r *Reaction) bool {\n\tfor _, got := range rs {\n\t\tsame := got.UserId == r.UserId && got.EmojiName == r.EmojiName\n\t\tuse(same)\n\t}\n\treturn false\n}\n", nil},
+		{"ID equality in a lookup loop is not access", "store/members.go",
+			"package store\n\nfunc find(ms []M, userID string) *M {\n\tfor i, m := range ms {\n\t\tif m.UserID == userID {\n\t\t\treturn &ms[i]\n\t\t}\n\t}\n\treturn nil\n}\n",
+			"package store\n\nfunc find(ms []M, userID string) *M {\n\tfor i := range ms {\n\t\tif ms[i].UserID == userID {\n\t\t\treturn &ms[i]\n\t\t}\n\t}\n\treturn nil\n}\n", nil},
+		{"re-indented access check is kept", "internal/web/documents.go", handler,
+			strings.Replace(handler, "\tif doc.OwnerID != user.ID && !user.IsAdmin {\n\t\thttp.Error(w, \"forbidden\", http.StatusForbidden)\n\t\treturn\n\t}\n",
+				"\tif s.enforce {\n\t\tif doc.OwnerID != user.ID && !user.IsAdmin {\n\t\t\thttp.Error(w, \"forbidden\", http.StatusForbidden)\n\t\t\treturn\n\t\t}\n\t}\n", 1),
+			nil},
+		{"validation message saying forbidden is not access", "internal/web/names.go",
+			"package web\n\nfunc check(n string) error {\n\tif strings.ContainsAny(n, \"/\") {\n\t\treturn errors.New(\"name has forbidden characters\")\n\t}\n\treturn nil\n}\n",
+			"package web\n\nfunc check(n string) error {\n\tif strings.ContainsAny(n, \"/\\\\\") {\n\t\treturn errors.New(\"name has forbidden characters\")\n\t}\n\treturn nil\n}\n", nil},
+		{"adding an access check is not reported", "internal/web/documents.go",
+			strings.Replace(handler, "\tif doc.OwnerID != user.ID && !user.IsAdmin {\n\t\thttp.Error(w, \"forbidden\", http.StatusForbidden)\n\t\treturn\n\t}\n", "", 1),
+			handler, nil},
+	})
+
 	const errs = `package store
 
 import "log"
@@ -354,6 +422,8 @@ func TestOther(t *testing.T) {
 	run(t, []tc{
 		{"syntax error on changed line", "x/x.go", "package x\n\nfunc F() {}\n", "package x\n\nfunc F() {\n",
 			[]string{"parse_error  @3"}},
+		{"Go 1.26 new(expr) parses", "x/x.go", "package x\n\nfunc F(p P) {\n}\n",
+			"package x\n\nfunc F(p P) {\n\ta := new(int(p.GetLimit()))\n\tb := new(50)\n\tuse(a, b, new(T))\n}\n", nil},
 		{"generated files are skipped", "x/x.pb.go", "// Code generated by protoc-gen-go. DO NOT EDIT.\npackage x\n\nfunc F(a int) {}\n",
 			"// Code generated by protoc-gen-go. DO NOT EDIT.\npackage x\n\nfunc F(a string) {}\n", nil},
 	})
@@ -422,6 +492,43 @@ export function formatAccessibleLabel(s: string) {
 			[]string{"auth_logic_changed requireAdmin @4"}},
 		{"accessible is not access", "src/perm.ts", auth,
 			strings.Replace(auth, "return s.trim();", "return s.trim().toLowerCase();", 1),
+			nil},
+	})
+
+	const actions = `export function DocumentActions({ user, doc, items, onDelete }: Props) {
+  return (
+    <div className="flex gap-2">
+      <ShareButton doc={doc} />
+      {user.isAdmin && <DeleteButton onClick={() => onDelete(doc.id)} />}
+      {items.length > 0 && <List items={items} />}
+      {doc.authorId === user.id ? <EditButton /> : null}
+    </div>
+  );
+}
+`
+	run(t, []tc{
+		// Thread A's testdata/injection/admin-button.txt.
+		{"admin guard removed from JSX", "frontend/src/components/DocumentActions.tsx", actions,
+			strings.Replace(actions, "{user.isAdmin && <DeleteButton", "{<DeleteButton", 1),
+			[]string{"auth_logic_changed DocumentActions @5"}},
+		{"ownership ternary changed", "frontend/src/components/DocumentActions.tsx", actions,
+			strings.Replace(actions, "doc.authorId === user.id ?", "true ?", 1),
+			[]string{"auth_logic_changed DocumentActions @7"}},
+		{"editing the guarded element keeps the guard", "frontend/src/components/DocumentActions.tsx", actions,
+			strings.Replace(actions, "<DeleteButton onClick", "<DeleteButton label=\"Remove\" onClick", 1),
+			nil},
+		{"ownership used for styling is not access", "src/Bubble.tsx",
+			"export const Bubble = ({ msg, me }: P) => <div className={msg.authorId === me.id ? 'right' : 'left'}>{msg.text}</div>;\n",
+			"export const Bubble = ({ msg, me }: P) => <div className={msg.authorId === me.id ? 'end' : 'start'}>{msg.text}</div>;\n",
+			nil},
+		{"client handling a 401 is not access", "src/api.ts",
+			"export async function get(res: Res) {\n  if (res.statusCode === 401) {\n    throw new UnauthorizedError('login again');\n  }\n}\n",
+			"export async function get(res: Res) {\n}\n", nil},
+		{"stream canRead is not access", "src/stream.ts",
+			"export function pump(s: S) {\n  if (!s.canRead || s.closed) {\n    return;\n  }\n  s.read();\n}\n",
+			"export function pump(s: S) {\n  if (s.closed) {\n    return;\n  }\n  s.read();\n}\n", nil},
+		{"non-access guard removed", "frontend/src/components/DocumentActions.tsx", actions,
+			strings.Replace(actions, "{items.length > 0 && <List items={items} />}", "<List items={items} />", 1),
 			nil},
 	})
 

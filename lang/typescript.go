@@ -53,6 +53,7 @@ func (tsBackend) Analyze(ctx context.Context, fc risk.FileChange) ([]risk.Findin
 		p.compareAPI(tsAPI(p.old), tsAPI(p.new))
 	}
 	if !test {
+		p.accessChanges(tsSymbol)
 		p.authChanges(tsAuthHit, tsSymbol)
 	}
 	if p.new != nil {

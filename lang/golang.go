@@ -29,6 +29,7 @@ func (goBackend) Analyze(ctx context.Context, fc risk.FileChange) ([]risk.Findin
 		p.compareAPI(goAPI(p.old), goAPI(p.new))
 	}
 	if !test {
+		p.accessChanges(goSymbol)
 		p.authChanges(goAuthHit, goSymbol)
 	}
 	if p.new != nil {
