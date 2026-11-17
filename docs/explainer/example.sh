@@ -197,12 +197,23 @@ if [ "${PHASE:-1}" = 1 ]; then
     "$BRISK" "${common[@]}" --backend rules-only > "$OUT/$c.rules.json"
     "$BRISK" "${common[@]}" --config "$PROJECT" --backend host > "$OUT/$c.project.host.json"
     git -C "$R" diff main "$c" > "$OUT/$c.diff"
-    jq -c --arg k "$c" '{key:$k, request_id, state, questions}' "$OUT/$c.host.json" >> "$OUT/req.jsonl"
-    jq -c --arg k "$c@project" '{key:$k, request_id, state, questions}' "$OUT/$c.project.host.json" >> "$OUT/req.jsonl"
+    # Each host request is two Jev calls on the same state: the calibrated
+    # questions, and the review plan's area scores (key <case>#review).
+    for k in "$c" "$c@project"; do
+      f="$OUT/$c.host.json"; [ "$k" = "$c" ] || f="$OUT/$c.project.host.json"
+      jq -c --arg k "$k" '{key:$k, request_id, state, questions}' "$f" >> "$OUT/req.jsonl"
+      jq -c --arg k "$k#review" 'select(.review_questions != null) | {key:$k, request_id, state, questions: .review_questions}' "$f" >> "$OUT/req.jsonl"
+    done
   done
 else
   # The last successful answer per key; a retried request leaves an error line too.
-  answers() { jq -s --arg k "$1" 'map(select(.key==$k and (.error|not)))|last|{schema:"brisk.host-answers/v1", request_id, model, answers}' "$OUT/ans.jsonl"; }
+  answers() {
+    jq -s --arg k "$1" '
+      def last_ok($key): map(select(.key==$key and (.error|not)))|last;
+      last_ok($k) as $m | last_ok($k+"#review") as $r
+      | {schema:"brisk.host-answers/v1", request_id:$m.request_id, model:$m.model, answers:$m.answers}
+        + (if $r then {review_answers:$r.answers} else {} end)' "$OUT/ans.jsonl"
+  }
   for c in $CASES; do
     answers "$c" > "$OUT/$c.answers.json"
     answers "$c@project" > "$OUT/$c.project.answers.json"

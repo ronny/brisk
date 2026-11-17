@@ -14,3 +14,9 @@ questions:
     raise_to: high
     min: 0.8
     reason: Changes who can see or edit a document (SEC-3).
+review_checks:
+  document_access:
+    area: Document sharing
+    checks:
+      - Confirm a new document is visible only to its owner until they share it.
+      - Find or add a test that another workspace member cannot open a private document.

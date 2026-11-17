@@ -17,7 +17,6 @@ import sys
 
 out = pathlib.Path(sys.argv[1])
 page = pathlib.Path(__file__).with_name("index.html")
-BRISK_QUESTIONS = {"impact", "uncertainty", "weakens_auth", "destroys_data", "breaks_contract", "breaks_deploy"}
 cal_path = pathlib.Path(os.environ.get("CALIBRATION") or pathlib.Path(__file__).parents[2] / "calibration" / "jev-1.14.json")
 
 CASES = [
@@ -34,8 +33,9 @@ def project(f):
         return None
     a = json.loads(f.read_text())
     return {k: a.get(k) for k in ("tier", "floor", "reasons", "agent_review")} | {
+        "review_plan": a["provenance"].get("review_plan"),
         "rule_hits": a["provenance"]["rule_hits"],
-        "answers": {q: v for q, v in a["provenance"].get("answers", {}).items() if q not in BRISK_QUESTIONS},
+        "answers": a["provenance"].get("answers", {}),
     }
 
 
@@ -53,6 +53,8 @@ for key, title, message in CASES:
         "diff": (out / f"{key}.diff").read_text(),
         "state": host["state"],
         "request_id": host["request_id"],
+        # Scored in a second Jev call; areas Jev rates below 1 are dropped unless required.
+        "review_questions": host.get("review_questions"),
         "floor_assessment": {k: host["floor_assessment"][k] for k in ("tier", "floor", "reasons")},
         "final": {
             "tier": final["tier"],
@@ -65,7 +67,7 @@ for key, title, message in CASES:
             "stats": final["stats"],
             "provenance": {k: prov.get(k) for k in (
                 "brisk_version", "backend", "model", "calibration", "diff_hash",
-                "rule_hits", "findings", "model_risk", "duration_ms", "preset", "thresholds")}
+                "rule_hits", "findings", "model_risk", "duration_ms", "preset", "thresholds", "review_plan")}
             | {"answers": {q: {k: v for k, v in a.items() if k != "legend"} for q, a in prov["answers"].items()}},
         },
         "text": (out / f"{key}.final.txt").read_text(),
