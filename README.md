@@ -62,6 +62,30 @@ sensitive_paths:
     floor: high
 ```
 
+### Project rules
+
+A repo adds its own checks in the same file. `sensitive_paths` and `content_rules` are deterministic and set the floor; `questions` are asked of the model with brisk's own questions and can only raise the tier. Project questions have no calibration weight, so they act only through `raise_to`; without it the answer is just recorded in `provenance.answers`.
+
+```yaml
+content_rules:
+  - id: invoice_rounding
+    paths: ["internal/invoice/**"]
+    pattern: 'math\.(Round|Floor|Ceil)|RoundingMode'   # Go RE2, per changed line
+    lines: added                                       # or removed, both
+    floor: medium
+    reason: Invoice totals must use banker's rounding (FR-12).
+questions:
+  - id: invoice_rounding_changed
+    text: Does this change how invoice totals or tax amounts are rounded?
+    raise_to: high
+    min: 0.8
+    reason: Changes invoice rounding (FR-12).
+```
+
+A content rule matches one line at a time, so it is a tripwire, not a guarantee: a call split across lines or an import alias slips past it. Pair an important one with a question.
+
+Test a project rule with a fixture in `testdata/fixtures/` (a base `.brisk.yaml`, base and head files, and the expected tier), or with a throwaway commit and `brisk assess --base HEAD`.
+
 ## Documents
 
 | Schema | Go type |

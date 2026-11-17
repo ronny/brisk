@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -89,12 +90,12 @@ func (e *Engine) Prepare(ctx context.Context, in Input) (*Prepared, error) {
 	lap("context", t)
 
 	if p.Policy, err = ResolvePolicy(p.Context.Policy); err == nil {
-		err = p.Policy.CheckIDs(rules.KnownIDs(), p.Context.SensitivePaths)
+		err = p.Policy.CheckIDs(rules.KnownIDs(), projectIDs(p.Context))
 	}
 	if err != nil {
 		return nil, fmt.Errorf(".brisk.yaml: %w", err)
 	}
-	p.Hits = rules.Apply(cs, p.Findings, in.Session, rules.Config{PathRules: p.Context.SensitivePaths})
+	p.Hits = rules.Apply(cs, p.Findings, in.Session, rules.Config{PathRules: p.Context.SensitivePaths, ContentRules: p.Context.ContentRules})
 	for i, h := range p.Hits {
 		// A project rule hits as config:<id>; its id may be written either way.
 		if t, ok := p.Policy.RuleTiers[h.ID]; ok {
@@ -110,7 +111,7 @@ func (e *Engine) Prepare(ctx context.Context, in Input) (*Prepared, error) {
 	if len(cs.Files) > 0 {
 		req := risk.Request{
 			State:     buildState(cs, p.Findings, p.Hits, p.Context, in.Session, in.Task),
-			Questions: Questions,
+			Questions: p.Policy.RequestQuestions(),
 		}
 		id, err := host.Key(req)
 		if err != nil {
@@ -127,6 +128,17 @@ func unmarkGenerated(src []byte) []byte {
 		return nil
 	}
 	return []byte(strings.NewReplacer("DO NOT EDIT", "do not edit", "@generated", "@Generated").Replace(string(src)))
+}
+
+func projectIDs(pc risk.ProjectContext) []string {
+	var ids []string
+	for _, r := range pc.SensitivePaths {
+		ids = append(ids, r.ID)
+	}
+	for _, r := range pc.ContentRules {
+		ids = append(ids, r.ID)
+	}
+	return ids
 }
 
 // analyze runs the language backends over changed files in parallel.
@@ -264,8 +276,10 @@ func Features(answers map[string]risk.Answer, history, size float64) map[string]
 	f["impact"] = score("impact")
 	f["uncertainty"] = score("uncertainty")
 	f["impact_x_uncertainty"] = f["impact"] * f["uncertainty"]
-	for _, a := range answers {
-		if a.Type == "noul" && a.Noul != nil && clamp(*a.Noul) > f["flags"] {
+	// Only brisk's own questions are calibrated; a project's questions act
+	// through overrides alone.
+	for name := range flagText {
+		if a := answers[name]; a.Noul != nil && clamp(*a.Noul) > f["flags"] {
 			f["flags"] = clamp(*a.Noul)
 		}
 	}
@@ -350,10 +364,9 @@ func (p *Prepared) Finish(backend string, resp *risk.Response, degraded string) 
 			if !ok {
 				a.Provenance.Calibration += " (no table for " + calibration.Normalise(resp.Model) + ")"
 			}
-			if t, perr := p.Policy.Table(table); perr == nil {
-				table = t
-			} else {
-				a.Provenance.PolicyNote = perr.Error() + "; using the calibration's thresholds"
+			table, err = p.Policy.Table(table)
+			if err != nil {
+				a.Provenance.PolicyNote = err.Error() + "; using the calibration's thresholds"
 			}
 			a.Provenance.Thresholds = map[string]float64{"medium": table.Thresholds.Medium, "high": table.Thresholds.High}
 			feats := Features(resp.Answers, p.History(), SizeFeature(a.Stats.Additions+a.Stats.Deletions))
@@ -365,7 +378,14 @@ func (p *Prepared) Finish(backend string, resp *risk.Response, degraded string) 
 			modelTier, fired := ModelTier(table, r, resp.Answers)
 			a.Tier = risk.Max(p.Floor, modelTier)
 			if modelTier > risk.Low {
-				candidates = append(candidates, modelReasons(table, feats, r, resp.Answers, fired, a.Stats)...)
+				for _, c := range modelReasons(table, feats, r, resp.Answers, fired, a.Stats) {
+					// Only a fired override speaks for a project question;
+					// feature reasons such as size keep brisk's text.
+					if slices.ContainsFunc(fired, func(o calibration.Override) bool { return o.Question == c.ID }) {
+						c.Text = p.Policy.questionText(c.ID, c.Text, resp.Answers)
+					}
+					candidates = append(candidates, c)
+				}
 			}
 		} else {
 			a.Provenance.Degraded = "calibration: " + err.Error()

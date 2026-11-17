@@ -741,3 +741,149 @@ func TestPolicyThresholdsAndSafety(t *testing.T) {
 		write(t, dir, "core/x.go", "package core\n\nvar X = 1\n")
 	}
 }
+
+// A content rule in the base .brisk.yaml sets a floor when a changed line
+// in a matching path matches; comments, unmatched paths and the wrong side
+// of the diff do not fire it.
+func TestContentRules(t *testing.T) {
+	dir := newRepo(t)
+	write(t, dir, ".brisk.yaml", `content_rules:
+  - id: invoice_rounding
+    paths: ["totals/**"]
+    pattern: 'math\.(Round|Floor|Ceil)|RoundingMode'
+    lines: added
+    floor: high
+    reason: Invoice totals must use banker's rounding (finance rule FR-12).
+`)
+	write(t, dir, "totals/total.go", "package totals\n\nfunc Total(x float64) float64 { return x }\n")
+	git(t, dir, "add", "-A")
+	git(t, dir, "commit", "-q", "-m", "base")
+	cases := []struct {
+		name, path, content string
+		want                risk.Tier
+	}{
+		{"added match", "totals/total.go", "package totals\n\nimport \"math\"\n\nfunc Total(x float64) float64 { return math.Round(x*100) / 100 }\n", risk.High},
+		{"comment only", "totals/total.go", "package totals\n\n// math.Round is not used here\nfunc Total(x float64) float64 { return x }\n", risk.Low},
+		{"other path", "report/total.go", "package report\n\nimport \"math\"\n\nvar R = math.Round(1.5)\n", risk.Low},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			git(t, dir, "checkout", "-q", "--", ".")
+			git(t, dir, "clean", "-qfd")
+			write(t, dir, c.path, c.content)
+			a := assessJSON(t, "--repo", dir, "--base", "HEAD")
+			if a.Floor != c.want || (c.want == risk.High) != slices.Contains(a.Provenance.RuleHits, "config:invoice_rounding") {
+				t.Fatalf("floor %s hits %v, want %s", a.Floor, a.Provenance.RuleHits, c.want)
+			}
+			if c.want == risk.High && (len(a.Reasons) == 0 || !strings.Contains(a.Reasons[0].Text, "banker's rounding") || len(a.Reasons[0].Evidence) == 0) {
+				t.Fatalf("reasons %+v, want the configured reason with line evidence", a.Reasons)
+			}
+		})
+	}
+	// Removing the matching line fires only with lines: removed or both.
+	git(t, dir, "checkout", "-q", "--", ".")
+	write(t, dir, "totals/total.go", "package totals\n\nimport \"math\"\n\nfunc Total(x float64) float64 { return math.Round(x) }\n")
+	git(t, dir, "add", "-A")
+	git(t, dir, "commit", "-q", "-m", "round")
+	write(t, dir, "totals/total.go", "package totals\n\nfunc Total(x float64) float64 { return x }\n")
+	if a := assessJSON(t, "--repo", dir, "--base", "HEAD"); a.Floor != risk.Low {
+		t.Fatalf("removed line with lines: added gave floor %s", a.Floor)
+	}
+
+	// A bad pattern is an error, not a rule that never fires.
+	write(t, dir, ".brisk.yaml", "content_rules:\n  - id: bad\n    pattern: '(['\n    floor: high\n    reason: x\n")
+	git(t, dir, "add", "-A")
+	git(t, dir, "commit", "-q", "-m", "bad")
+	write(t, dir, "totals/total.go", "package totals\n")
+	if code, _, errs := runCLI(t, "assess", "--repo", dir, "--base", "HEAD"); code != 1 || !strings.Contains(errs, "bad") {
+		t.Fatalf("bad pattern: exit %d stderr %q", code, errs)
+	}
+}
+
+// A project question is asked with brisk's own; a strong answer raises the
+// tier to raise_to with the configured reason, a weak one changes nothing,
+// and neither lowers the rule floor.
+func TestProjectQuestions(t *testing.T) {
+	dir := newRepo(t)
+	write(t, dir, ".brisk.yaml", `questions:
+  - id: invoice_rounding
+    text: Does this change how invoice totals are rounded?
+    raise_to: high
+    min: 0.7
+    reason: Changes invoice rounding (finance rule FR-12).
+`)
+	git(t, dir, "add", "-A")
+	git(t, dir, "commit", "-q", "-m", "policy")
+	write(t, dir, "internal/store/users.go", "package store\n\nfunc Users() { /* v2 */ }\n")
+	code, out, errs := runCLI(t, "assess", "--repo", dir, "--base", "HEAD", "--backend", "host", "--format", "json")
+	if code != 0 {
+		t.Fatal(errs)
+	}
+	var req risk.HostRequest
+	if err := json.Unmarshal([]byte(out), &req); err != nil {
+		t.Fatal(err)
+	}
+	q, ok := req.Questions["invoice_rounding"]
+	if !ok || q.Type != "noul" || !strings.Contains(fmt.Sprint(q.Instructions), "invoice totals are rounded") || len(req.Questions) < 2 {
+		t.Fatalf("questions %v; want the project question beside brisk's", req.Questions)
+	}
+	answer := func(v float64) string {
+		ans := map[string]risk.Answer{}
+		for name, q := range req.Questions {
+			n := 0.0
+			if name == "invoice_rounding" {
+				n = v
+			}
+			if q.Type == "noul" {
+				ans[name] = risk.Answer{Type: "noul", Noul: &n}
+			} else {
+				ans[name] = risk.Answer{Type: "score", Score: &n}
+			}
+		}
+		b, _ := json.Marshal(risk.HostAnswers{Schema: risk.HostAnswersSchema, RequestID: req.RequestID, Model: "jev-1.14.0", Answers: ans})
+		p := filepath.Join(t.TempDir(), "a.json")
+		os.WriteFile(p, b, 0o644)
+		return p
+	}
+	a := assessJSON(t, "--repo", dir, "--base", "HEAD", "--answers", answer(0.9))
+	if a.Tier != risk.High || len(a.Reasons) == 0 || a.Reasons[0].ID != "invoice_rounding" || !strings.Contains(a.Reasons[0].Text, "FR-12") {
+		t.Fatalf("strong answer: tier %s reasons %+v, want high with the configured reason", a.Tier, a.Reasons)
+	}
+	if a.AgentReview.Reason != "" && strings.Contains(a.AgentReview.Reason, "FR-12") {
+		t.Fatalf("agent_review reason %q carries config text", a.AgentReview.Reason)
+	}
+	if a := assessJSON(t, "--repo", dir, "--base", "HEAD", "--answers", answer(0.6)); a.Tier != risk.Low {
+		t.Fatalf("weak answer: tier %s, want low", a.Tier)
+	}
+
+	// Without raise_to the answer is recorded and calibrated risk ignores it.
+	write(t, dir, ".brisk.yaml", "questions:\n  - id: invoice_rounding\n    text: Does this change how invoice totals are rounded?\n")
+	git(t, dir, "add", "-A")
+	git(t, dir, "commit", "-q", "-m", "policy2")
+	write(t, dir, "internal/store/users.go", "package store\n\nfunc Users() { /* v3 */ }\n")
+	_, out, _ = runCLI(t, "assess", "--repo", dir, "--base", "HEAD", "--backend", "host", "--format", "json")
+	req = risk.HostRequest{}
+	json.Unmarshal([]byte(out), &req)
+	a = assessJSON(t, "--repo", dir, "--base", "HEAD", "--answers", answer(1))
+	if a.Tier != risk.Low || a.Provenance.Answers["invoice_rounding"].Noul == nil {
+		t.Fatalf("no raise_to: tier %s answers %v, want low with the answer recorded", a.Tier, a.Provenance.Answers)
+	}
+
+	for config, want := range map[string]string{
+		"questions:\n  - id: weakens_auth\n    text: x?\n":                   "already used",
+		"questions:\n  - id: a_b\n    text: x?\n    raise_to: low\n":         "medium or high",
+		"questions:\n  - id: a_b\n    text: x?\n    min: 2\n":                "between 0 and 1",
+		"questions:\n  - id: Bad\n    text: x?\n":                            "lowercase",
+		"questions:\n  - id: size\n    text: x?\n":                           "already used",
+		"agent_review:\n  questions: {invoice_rounding_chaged: 0.5}\n":       "unknown question",
+		"questions:\n  - id: a_b\n    text: x?\n  - id: a_b\n    text: y?\n": "already used",
+	} {
+		write(t, dir, ".brisk.yaml", config)
+		git(t, dir, "add", "-A")
+		git(t, dir, "commit", "-q", "-m", "config")
+		write(t, dir, "internal/store/users.go", "package store\n\nfunc Users() { /* v4 */ }\n")
+		if code, _, errs := runCLI(t, "assess", "--repo", dir, "--base", "HEAD"); code != 1 || !strings.Contains(errs, want) {
+			t.Errorf("config %q: exit %d, stderr %q, want %q", config, code, errs, want)
+		}
+	}
+}

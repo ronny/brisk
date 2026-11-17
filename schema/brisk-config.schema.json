@@ -25,6 +25,40 @@
         }
       }
     },
+    "content_rules": {
+      "type": "array",
+      "description": "Project rules on changed lines: a matching non-comment line in a matching path sets at least this tier. They hit as config:<id>.",
+      "items": {
+        "type": "object",
+        "required": ["id", "pattern", "floor"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string" },
+          "paths": { "type": "array", "items": { "type": "string" }, "description": "gitignore-style globs, ** allowed; empty means every code file" },
+          "pattern": { "type": "string", "description": "Go RE2 regular expression, matched against each changed line" },
+          "lines": { "enum": ["added", "removed", "both"], "default": "added" },
+          "floor": { "$ref": "#/$defs/tier" },
+          "reason": { "type": "string" }
+        }
+      }
+    },
+    "questions": {
+      "type": "array",
+      "maxItems": 10,
+      "description": "The project's own yes/no questions, asked in the same model request. Uncalibrated: they raise the tier only through raise_to and never lower it.",
+      "items": {
+        "type": "object",
+        "required": ["id", "text"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z][a-z0-9_]{1,40}$", "description": "Must not be one of brisk's question names" },
+          "text": { "type": "string", "minLength": 1, "maxLength": 500 },
+          "raise_to": { "enum": ["medium", "high"], "description": "Tier when the answer is at least min; omit to only record the answer" },
+          "min": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.8 },
+          "reason": { "type": "string", "maxLength": 200, "description": "Shown in reasons when the question raises the tier; never in agent_review.reason" }
+        }
+      }
+    },
     "preset": {
       "enum": ["autonomous", "reviewed", "strict"],
       "description": "autonomous: nobody reviews by hand; High (about 26% of changes in the evaluation) asks for an agent review. reviewed (default): human reviewers; the calibrated thresholds. strict: high-stakes code; wider Medium and High, and an agent review for every Medium or High change. The names match the Amp plugin's amp.brisk.preset."

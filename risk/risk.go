@@ -11,6 +11,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 )
 
@@ -381,6 +382,8 @@ type ContextQuery struct {
 type ProjectContext struct {
 	// SensitivePaths are project-specific rules, such as from .brisk.yaml.
 	SensitivePaths []PathRule `json:"sensitive_paths,omitempty"`
+	// ContentRules are project rules on changed lines, from .brisk.yaml.
+	ContentRules []ContentRule `json:"content_rules,omitempty"`
 	// Policy is the project's risk policy from .brisk.yaml.
 	Policy PolicyConfig `json:"policy,omitempty"`
 	// Files holds history per changed path.
@@ -409,6 +412,20 @@ type PolicyConfig struct {
 	// Actions is the text shown for each tier.
 	Actions     map[string]string  `json:"actions,omitempty" yaml:"actions"`
 	AgentReview *AgentReviewConfig `json:"agent_review,omitempty" yaml:"agent_review"`
+	// Questions are the project's own yes/no questions, asked in the same
+	// model request as brisk's.
+	Questions []QuestionConfig `json:"questions,omitempty" yaml:"questions"`
+}
+
+// QuestionConfig is a project's own yes/no question for the model. With
+// RaiseTo set, an answer at or above Min (default 0.8) raises the model
+// tier to RaiseTo; it can never lower a tier. Reason is shown when it fires.
+type QuestionConfig struct {
+	ID      string   `json:"id" yaml:"id"`
+	Text    string   `json:"text" yaml:"text"`
+	RaiseTo string   `json:"raise_to,omitempty" yaml:"raise_to"`
+	Min     *float64 `json:"min,omitempty" yaml:"min"`
+	Reason  string   `json:"reason,omitempty" yaml:"reason"`
 }
 
 // OverrideConfig raises the model tier when one answer is strong enough.
@@ -439,6 +456,17 @@ type PathRule struct {
 	Paths  []string `json:"paths" yaml:"paths"` // gitignore-style globs, "**" allowed
 	Floor  Tier     `json:"floor" yaml:"floor"`
 	Reason string   `json:"reason" yaml:"reason"`
+}
+
+// ContentRule marks changed lines that need at least a given tier: a
+// project's own business rule, such as "changes invoice rounding".
+type ContentRule struct {
+	ID      string         `json:"id"`
+	Paths   []string       `json:"paths,omitempty"` // globs; empty means code files
+	Pattern *regexp.Regexp `json:"-"`
+	Lines   string         `json:"lines,omitempty"` // "added" (default), "removed", or "both"
+	Floor   Tier           `json:"floor"`
+	Reason  string         `json:"reason,omitempty"`
 }
 
 // FileHistory is the history of one path before the change.

@@ -45,51 +45,106 @@ type Config struct {
 		Floor  string   `yaml:"floor"`
 		Reason string   `yaml:"reason"`
 	} `yaml:"sensitive_paths"`
+	ContentRules []struct {
+		ID      string   `yaml:"id"`
+		Paths   []string `yaml:"paths"`
+		Pattern string   `yaml:"pattern"`
+		Lines   string   `yaml:"lines"`
+		Floor   string   `yaml:"floor"`
+		Reason  string   `yaml:"reason"`
+	} `yaml:"content_rules"`
 	risk.PolicyConfig `yaml:",inline"`
 }
 
+// Rules is what a .brisk.yaml file holds.
+type Rules struct {
+	Paths   []risk.PathRule
+	Content []risk.ContentRule
+	Policy  risk.PolicyConfig
+}
+
 // LoadConfig reads a .brisk.yaml file. A missing file is not an error.
-func LoadConfig(p string) ([]risk.PathRule, risk.PolicyConfig, error) {
+func LoadConfig(p string) (Rules, error) {
 	b, err := os.ReadFile(p)
 	if os.IsNotExist(err) {
-		return nil, risk.PolicyConfig{}, nil
+		return Rules{}, nil
 	}
 	if err != nil {
-		return nil, risk.PolicyConfig{}, err
+		return Rules{}, err
 	}
 	return ParseConfig(p, b)
 }
 
 // ParseConfig parses .brisk.yaml content; p names it in errors. Unknown
 // keys are errors, so a misspelt setting does not silently do nothing.
-func ParseConfig(p string, b []byte) ([]risk.PathRule, risk.PolicyConfig, error) {
+func ParseConfig(p string, b []byte) (Rules, error) {
 	var c Config
 	dec := yaml.NewDecoder(bytes.NewReader(b))
 	dec.KnownFields(true)
 	if err := dec.Decode(&c); err != nil && err != io.EOF {
-		return nil, risk.PolicyConfig{}, fmt.Errorf("%s: %w", p, err)
+		return Rules{}, fmt.Errorf("%s: %w", p, err)
 	}
 	var more any
 	if err := dec.Decode(&more); err != io.EOF {
-		return nil, risk.PolicyConfig{}, fmt.Errorf("%s: only one YAML document is allowed", p)
+		return Rules{}, fmt.Errorf("%s: only one YAML document is allowed", p)
 	}
-	var out []risk.PathRule
+	fail := func(format string, args ...any) (Rules, error) {
+		return Rules{}, fmt.Errorf("%s: %s", p, fmt.Sprintf(format, args...))
+	}
+	globsOK := func(gs []string) bool {
+		for _, g := range gs {
+			if !doublestar.ValidatePattern(g) {
+				return false
+			}
+		}
+		return true
+	}
+	out := Rules{Policy: c.PolicyConfig}
+	ids := map[string]bool{}
 	for _, r := range c.SensitivePaths {
 		t, err := risk.ParseTier(r.Floor)
 		if err != nil {
-			return nil, risk.PolicyConfig{}, fmt.Errorf("%s: sensitive path %q: %w", p, r.ID, err)
+			return fail("sensitive path %q: %v", r.ID, err)
 		}
 		if r.ID == "" || len(r.Paths) == 0 {
-			return nil, risk.PolicyConfig{}, fmt.Errorf("%s: each sensitive path needs an id and paths", p)
+			return fail("each sensitive path needs an id and paths")
 		}
-		for _, g := range r.Paths {
-			if !doublestar.ValidatePattern(g) {
-				return nil, risk.PolicyConfig{}, fmt.Errorf("%s: bad glob %q", p, g)
-			}
+		if !globsOK(r.Paths) {
+			return fail("sensitive path %q: bad glob in %v", r.ID, r.Paths)
 		}
-		out = append(out, risk.PathRule{ID: r.ID, Paths: r.Paths, Floor: t, Reason: r.Reason})
+		if ids[r.ID] {
+			return fail("rule id %q is used twice", r.ID)
+		}
+		ids[r.ID] = true
+		out.Paths = append(out.Paths, risk.PathRule{ID: r.ID, Paths: r.Paths, Floor: t, Reason: r.Reason})
 	}
-	return out, c.PolicyConfig, nil
+	for _, r := range c.ContentRules {
+		if r.ID == "" || r.Pattern == "" {
+			return fail("each content rule needs an id and a pattern")
+		}
+		if ids[r.ID] {
+			return fail("rule id %q is used twice", r.ID)
+		}
+		ids[r.ID] = true
+		t, err := risk.ParseTier(r.Floor)
+		if err != nil {
+			return fail("content rule %q: %v", r.ID, err)
+		}
+		re, err := regexp.Compile(r.Pattern)
+		if err != nil {
+			return fail("content rule %q: %v", r.ID, err)
+		}
+		switch r.Lines {
+		case "", "added", "removed", "both":
+		default:
+			return fail("content rule %q: lines must be added, removed, or both", r.ID)
+		}
+		if !globsOK(r.Paths) {
+			return fail("content rule %q: bad glob in %v", r.ID, r.Paths)
+		}
+		out.Content = append(out.Content, risk.ContentRule{ID: r.ID, Paths: r.Paths, Pattern: re, Lines: r.Lines, Floor: t, Reason: r.Reason})
+	}
+	return out, nil
 }
 
 // Context implements risk.ContextProvider.
@@ -97,18 +152,20 @@ func (p *Provider) Context(ctx context.Context, q risk.ContextQuery) (risk.Proje
 	var pc risk.ProjectContext
 	// The config comes from the base commit, so a change cannot loosen
 	// the rules that judge it. --config overrides it explicitly.
+	var cfg Rules
 	var err error
 	if p.ConfigPath != "" {
-		pc.SensitivePaths, pc.Policy, err = LoadConfig(p.ConfigPath)
+		cfg, err = LoadConfig(p.ConfigPath)
 	} else {
 		r := &gitx.Repo{Root: q.RepoRoot}
 		if b, gerr := r.Run(ctx, "show", q.Base+":.brisk.yaml"); gerr == nil {
-			pc.SensitivePaths, pc.Policy, err = ParseConfig(q.Base+":.brisk.yaml", b)
+			cfg, err = ParseConfig(q.Base+":.brisk.yaml", b)
 		}
 	}
 	if err != nil {
 		return pc, err
 	}
+	pc.SensitivePaths, pc.ContentRules, pc.Policy = cfg.Paths, cfg.Content, cfg.Policy
 
 	owners := loadCodeowners(q.RepoRoot)
 	hist, err := p.historyFor(ctx, q.RepoRoot, q.Base)

@@ -2,6 +2,7 @@ package assess
 
 import (
 	"fmt"
+	"regexp"
 	"slices"
 	"sort"
 
@@ -21,6 +22,50 @@ type Policy struct {
 	RuleTiers   map[string]risk.Tier
 	Actions     map[risk.Tier]string
 	Review      ReviewPolicy
+	Questions   []CustomQuestion // the project's own yes/no questions
+}
+
+// CustomQuestion is a project's own yes/no question, asked in the same
+// request as brisk's. It has no calibration weight: with RaiseTo set, an
+// answer at or above Min raises the model tier, and it never lowers one.
+type CustomQuestion struct {
+	ID      string
+	Text    string
+	RaiseTo *risk.Tier
+	Min     float64
+	Reason  string
+}
+
+// featureNames are calibration features that also name model reasons.
+var featureNames = []string{"size", "history", "flags", "impact_x_uncertainty"}
+
+var questionID = regexp.MustCompile(`^[a-z][a-z0-9_]{1,40}$`)
+
+// questionText gives a project question's reason from its config, or the
+// project question's own text when the config has none; other IDs keep text.
+func (p Policy) questionText(id, text string, answers map[string]risk.Answer) string {
+	for _, q := range p.Questions {
+		if q.ID == id {
+			r := q.Reason
+			if r == "" {
+				r = q.Text
+			}
+			return fmt.Sprintf("%s (model: %.2f)", r, noul(answers[id]))
+		}
+	}
+	return text
+}
+
+// RequestQuestions returns brisk's questions plus the project's.
+func (p Policy) RequestQuestions() map[string]risk.Question {
+	if len(p.Questions) == 0 {
+		return Questions
+	}
+	out := cloneMap(Questions)
+	for _, q := range p.Questions {
+		out[q.ID] = risk.Question{Type: "noul", Instructions: q.Text + guard}
+	}
+	return out
 }
 
 // ReviewPolicy says when to recommend an agent review. Any one condition
@@ -177,6 +222,38 @@ func ResolvePolicy(cfg risk.PolicyConfig) (Policy, error) {
 		}
 		p.Actions[t] = v
 	}
+	if len(cfg.Questions) > 10 {
+		return Policy{}, fmt.Errorf("questions: at most 10, got %d", len(cfg.Questions))
+	}
+	for _, q := range cfg.Questions {
+		if !questionID.MatchString(q.ID) {
+			return Policy{}, fmt.Errorf("question id %q: use 2-41 lowercase letters, digits or _", q.ID)
+		}
+		if _, ok := Questions[q.ID]; ok || slices.Contains(featureNames, q.ID) || slices.ContainsFunc(p.Questions, func(c CustomQuestion) bool { return c.ID == q.ID }) {
+			return Policy{}, fmt.Errorf("question id %q is already used", q.ID)
+		}
+		if q.Text == "" || len(q.Text) > 500 {
+			return Policy{}, fmt.Errorf("question %q: text must be 1-500 characters", q.ID)
+		}
+		if len(q.Reason) > 200 {
+			return Policy{}, fmt.Errorf("question %q: reason must be at most 200 characters", q.ID)
+		}
+		c := CustomQuestion{ID: q.ID, Text: q.Text, Min: 0.8, Reason: q.Reason}
+		if q.Min != nil {
+			if !(*q.Min >= 0 && *q.Min <= 1) {
+				return Policy{}, fmt.Errorf("question %q: min must be between 0 and 1", q.ID)
+			}
+			c.Min = *q.Min
+		}
+		if q.RaiseTo != "" {
+			t, err := risk.ParseTier(q.RaiseTo)
+			if err != nil || t == risk.Low {
+				return Policy{}, fmt.Errorf("question %q: raise_to must be medium or high", q.ID)
+			}
+			c.RaiseTo = &t
+		}
+		p.Questions = append(p.Questions, c)
+	}
 	if r := cfg.AgentReview; r != nil {
 		if r.MinTier != nil {
 			if *r.MinTier == "none" {
@@ -193,6 +270,12 @@ func ResolvePolicy(cfg risk.PolicyConfig) (Policy, error) {
 			p.Review.MinUncertainty = *r.MinUncertainty
 		}
 		if r.Questions != nil {
+			for q := range r.Questions {
+				_, builtin := Questions[q]
+				if !builtin && !slices.ContainsFunc(p.Questions, func(c CustomQuestion) bool { return c.ID == q }) {
+					return Policy{}, fmt.Errorf("agent_review.questions: unknown question %q", q)
+				}
+			}
 			p.Review.Questions = r.Questions
 		}
 		if r.Rules != nil {
@@ -203,18 +286,19 @@ func ResolvePolicy(cfg risk.PolicyConfig) (Policy, error) {
 }
 
 // CheckIDs reports rule IDs in rule_tiers and agent_review.rules that no
-// rule can set, and sensitive path IDs that clash with built-in ones, so a
+// rule can set, and project rule IDs (sensitive_paths, content_rules) that
+// clash with built-in ones, so a
 // misspelt ID is an error rather than a setting that does nothing.
-func (p Policy) CheckIDs(known map[string]bool, project []risk.PathRule) error {
+func (p Policy) CheckIDs(known map[string]bool, project []string) error {
 	ids := map[string]bool{}
 	for k := range known {
 		ids[k] = true
 	}
-	for _, r := range project {
-		if known[r.ID] {
-			return fmt.Errorf("sensitive path id %q is also a built-in rule; pick another", r.ID)
+	for _, id := range project {
+		if known[id] {
+			return fmt.Errorf("project rule id %q is also a built-in rule; pick another", id)
 		}
-		ids[r.ID], ids["config:"+r.ID] = true, true
+		ids[id], ids["config:"+id] = true, true
 	}
 	var bad []string
 	for id := range p.RuleTiers {
@@ -234,11 +318,18 @@ func (p Policy) CheckIDs(known map[string]bool, project []risk.PathRule) error {
 	return nil
 }
 
-// Table returns t with the policy's thresholds and overrides.
+// Table returns t with the policy's thresholds and overrides, plus one
+// override per project question that raises the tier. On error the table
+// still carries the overrides, with the calibration's thresholds.
 func (p Policy) Table(t *calibration.Table) (*calibration.Table, error) {
 	out := *t
 	if p.Overrides != nil {
 		out.Overrides = p.Overrides
+	}
+	for _, q := range p.Questions {
+		if q.RaiseTo != nil {
+			out.Overrides = append(slices.Clip(out.Overrides), calibration.Override{Question: q.ID, Min: q.Min, Tier: q.RaiseTo.String()})
+		}
 	}
 	switch {
 	case p.Thresholds != nil:
@@ -247,14 +338,16 @@ func (p Policy) Table(t *calibration.Table) (*calibration.Table, error) {
 		if p.HighShare != nil {
 			v, ok := t.ThresholdForShare(*p.HighShare)
 			if !ok {
-				return t, fmt.Errorf("calibration %s has no risk quantiles for high_share", t.ID)
+				out.Thresholds = t.Thresholds
+				return &out, fmt.Errorf("calibration %s has no risk quantiles for high_share", t.ID)
 			}
 			out.Thresholds.High = v
 		}
 		if p.MediumShare != nil {
 			v, ok := t.ThresholdForShare(*p.MediumShare)
 			if !ok {
-				return t, fmt.Errorf("calibration %s has no risk quantiles for medium_share", t.ID)
+				out.Thresholds = t.Thresholds
+				return &out, fmt.Errorf("calibration %s has no risk quantiles for medium_share", t.ID)
 			}
 			out.Thresholds.Medium = v
 		}

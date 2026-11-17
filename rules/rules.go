@@ -233,6 +233,16 @@ func generatorRan(cs *risk.ChangeSet, session *risk.Session) bool {
 	return false
 }
 
+func anyPath(globsList []string, paths []string) bool {
+	m := globs(globsList...)
+	for _, p := range paths {
+		if m(p) {
+			return true
+		}
+	}
+	return false
+}
+
 func codeOnly(fc risk.FileChange) bool {
 	return !IsTest(fc.Path) && !IsDoc(fc.Path) && !IsGeneratedChange(fc)
 }
@@ -321,7 +331,8 @@ var builtinLineRules = []lineRule{
 
 // Config adds project rules, e.g. from .brisk.yaml.
 type Config struct {
-	PathRules []risk.PathRule
+	PathRules    []risk.PathRule
+	ContentRules []risk.ContentRule
 }
 
 // Apply returns every rule hit for the change, the session, and the
@@ -383,6 +394,27 @@ func Apply(cs *risk.ChangeSet, findings []risk.Finding, session *risk.Session, c
 		}
 		if fc.Binary {
 			continue
+		}
+		for _, r := range cfg.ContentRules {
+			if len(r.Paths) == 0 && !codeOnly(fc) || len(r.Paths) > 0 && !anyPath(r.Paths, paths) {
+				continue
+			}
+			var lines []gitx.Line
+			if r.Lines != "removed" {
+				lines = gitx.AddedLines(fc)
+			}
+			if r.Lines == "removed" || r.Lines == "both" {
+				lines = append(lines, gitx.RemovedLines(fc)...)
+			}
+			text := r.Reason
+			if text == "" {
+				text = "Matches " + r.ID
+			}
+			for _, l := range lines {
+				if r.Pattern.MatchString(l.Text) && !isComment(fc.Path, l.Text) {
+					add("config:"+r.ID, r.Floor, text, "rule", risk.Evidence{Path: fc.Path, StartLine: l.N, EndLine: l.N})
+				}
+			}
 		}
 		added := gitx.AddedLines(fc)
 		for _, r := range builtinLineRules {
