@@ -39,8 +39,8 @@ type file struct {
 	changed map[int]bool // 0-based rows that changed on this side
 }
 
-func parse(l tswasm.Lang, path string, src []byte, changed map[int]bool) (*file, error) {
-	t, err := tswasm.Parse(l, src)
+func parse(ctx context.Context, l tswasm.Lang, path string, src []byte, changed map[int]bool) (*file, error) {
+	t, err := tswasm.Parse(ctx, l, src)
 	if err != nil {
 		return nil, err
 	}
@@ -220,30 +220,36 @@ type pair struct {
 	fc       risk.FileChange
 	out      []risk.Finding
 	authed   once // functions already given an auth_logic_changed finding
+	// generated is set when the new file carries a generated-code marker
+	// but is analyzed anyway (it is new, or the base was hand-written).
+	generated bool
 }
 
 func load(ctx context.Context, fc risk.FileChange, l tswasm.Lang, name string) (*pair, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if fc.Binary || len(fc.Old) > maxFileBytes || len(fc.New) > maxFileBytes ||
-		isGenerated(fc.New) || (fc.Status == risk.Deleted && isGenerated(fc.Old)) {
+	// Skip a generated file only when the base already had the marker and
+	// the change kept it (or deleted the file), so a marker comment cannot
+	// hide a new file or edits to a hand-written one.
+	skipGen := fc.Status != risk.Added && isGenerated(fc.Old) && (fc.Status == risk.Deleted || isGenerated(fc.New))
+	if fc.Binary || len(fc.Old) > maxFileBytes || len(fc.New) > maxFileBytes || skipGen {
 		return nil, nil
 	}
 	oldRows, newRows := changedRows(fc)
-	p := &pair{lang: name, fc: fc, authed: once{}}
+	p := &pair{lang: name, fc: fc, authed: once{}, generated: fc.Status != risk.Deleted && isGenerated(fc.New)}
 	var err error
 	if fc.Status != risk.Added && len(fc.Old) > 0 {
 		path := fc.OldPath
 		if path == "" {
 			path = fc.Path
 		}
-		if p.old, err = parse(l, path, fc.Old, oldRows); err != nil {
+		if p.old, err = parse(ctx, l, path, fc.Old, oldRows); err != nil {
 			return nil, err
 		}
 	}
 	if fc.Status != risk.Deleted && len(fc.New) > 0 {
-		if p.new, err = parse(l, fc.Path, fc.New, newRows); err != nil {
+		if p.new, err = parse(ctx, l, fc.Path, fc.New, newRows); err != nil {
 			return nil, err
 		}
 	}
@@ -256,6 +262,9 @@ func (p *pair) add(kind risk.FindingKind, f *file, i int32, symbol, detail strin
 }
 
 func (p *pair) addLines(kind risk.FindingKind, start, end int, symbol, detail string) {
+	if p.generated {
+		detail += " The file says it is generated; check that a generator produced it."
+	}
 	p.out = append(p.out, risk.Finding{
 		Kind: kind, Path: p.fc.Path, StartLine: start, EndLine: end,
 		Symbol: symbol, Detail: detail, Language: p.lang,
@@ -477,21 +486,38 @@ func (p *pair) accessChanges(symbol func(*file, int32) string) {
 	if p.old == nil {
 		return
 	}
-	kept := map[string]bool{}
+	// An old check counts as kept when the same function in the new file
+	// still has a check with the same condition. Each new check keeps one old
+	// check, so removing one of two identical guards is still reported.
+	kept := map[string]int{}
 	if f := p.new; f != nil {
 		for i := int32(0); i < int32(len(f.t.Nodes)); i++ {
 			if what, cond := access(f, i); what != "" {
-				kept[f.all(cond)] = true
+				kept[symbol(f, i)+"\x00"+f.all(cond)]++
 			}
 		}
 	}
+	// Unchanged old checks claim their new copies first, so the changed one
+	// of two identical checks is the one compared.
 	f, done := p.old, p.authed
+	var changed []int32
 	for i := int32(0); i < int32(len(f.t.Nodes)); i++ {
+		if what, cond := access(f, i); what != "" {
+			if f.startChanged(i) || f.touches(cond) {
+				changed = append(changed, i)
+			} else {
+				kept[symbol(f, i)+"\x00"+f.all(cond)]--
+			}
+		}
+	}
+	for _, i := range changed {
 		what, cond := access(f, i)
-		if what == "" || kept[f.all(cond)] || !(f.startChanged(i) || f.touches(cond)) {
+		sym := symbol(f, i)
+		if key := sym + "\x00" + f.all(cond); kept[key] > 0 {
+			kept[key]--
 			continue
 		}
-		if sym := symbol(f, i); done.first(sym) {
+		if done.first(sym) {
 			p.add(risk.AuthLogicChanged, f, i, sym, fmt.Sprintf("Removes or changes %s in %s.", what, orFile(sym)))
 		}
 	}

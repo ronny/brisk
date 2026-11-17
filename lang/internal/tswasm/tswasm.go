@@ -13,7 +13,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sync"
+	"sync/atomic"
 
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/api"
@@ -96,8 +96,6 @@ type names struct {
 }
 
 type runtime struct {
-	mu    sync.Mutex
-	ctx   context.Context
 	mod   api.Module
 	alloc api.Function
 	free  api.Function
@@ -106,33 +104,53 @@ type runtime struct {
 }
 
 var (
-	once    sync.Once
-	rt      *runtime
-	initErr error
+	// sem guards engine and inst; a parse waiting for it gives up when its
+	// context ends.
+	sem    = make(chan struct{}, 1)
+	engine wazero.Runtime
+	code   wazero.CompiledModule
+	inst   *runtime
+	// abandoned counts parses still running after their caller gave up.
+	// Each holds its own module instance, so cap them.
+	abandoned atomic.Int32
 )
 
-func get() (*runtime, error) {
-	once.Do(func() { rt, initErr = start(context.Background()) })
-	return rt, initErr
-}
+const maxAbandoned = 4
 
-func start(ctx context.Context) (*runtime, error) {
-	cfg := wazero.NewRuntimeConfig()
-	if dir, err := os.UserCacheDir(); err == nil {
-		// Compiling the module to machine code takes ~150 ms; cache it.
-		if cache, err := wazero.NewCompilationCacheWithDir(filepath.Join(dir, "brisk", "wazero")); err == nil {
-			cfg = cfg.WithCompilationCache(cache)
-		}
+// get returns the module instance, compiling and instantiating it first if
+// needed. Call with sem held.
+func get() (*runtime, error) {
+	if inst != nil {
+		return inst, nil
 	}
-	r := wazero.NewRuntimeWithConfig(ctx, cfg)
-	wasi_snapshot_preview1.MustInstantiate(ctx, r)
-	mod, err := r.InstantiateWithConfig(ctx, wasm,
-		wazero.NewModuleConfig().WithStartFunctions("_initialize"))
+	ctx := context.Background()
+	if engine == nil {
+		// Not WithCloseOnContextDone: its checks make parsing ~3x slower.
+		// Parse abandons a cancelled parse instead.
+		cfg := wazero.NewRuntimeConfig()
+		if dir, err := os.UserCacheDir(); err == nil {
+			// Compiling the module to machine code takes ~150 ms; cache it.
+			if cache, err := wazero.NewCompilationCacheWithDir(filepath.Join(dir, "brisk", "wazero")); err == nil {
+				cfg = cfg.WithCompilationCache(cache)
+			}
+		}
+		r := wazero.NewRuntimeWithConfig(ctx, cfg)
+		wasi_snapshot_preview1.MustInstantiate(ctx, r)
+		c, err := r.CompileModule(ctx, wasm)
+		if err != nil {
+			r.Close(ctx) //nolint:errcheck
+			return nil, fmt.Errorf("tswasm: compile: %w", err)
+		}
+		engine, code = r, c
+	}
+	mod, err := engine.InstantiateModule(ctx, code,
+		// No name, so a new instance can start while an abandoned one
+		// finishes.
+		wazero.NewModuleConfig().WithName("").WithStartFunctions("_initialize"))
 	if err != nil {
 		return nil, fmt.Errorf("tswasm: instantiate: %w", err)
 	}
 	x := &runtime{
-		ctx:   ctx,
 		mod:   mod,
 		alloc: mod.ExportedFunction("bk_alloc"),
 		free:  mod.ExportedFunction("bk_free"),
@@ -141,15 +159,17 @@ func start(ctx context.Context) (*runtime, error) {
 	for l := Lang(0); l < nlang; l++ {
 		n, err := x.loadNames(l)
 		if err != nil {
+			mod.Close(ctx) //nolint:errcheck
 			return nil, err
 		}
 		x.names[l] = n
 	}
+	inst = x
 	return x, nil
 }
 
 func (x *runtime) call(name string, args ...uint64) (uint64, error) {
-	res, err := x.mod.ExportedFunction(name).Call(x.ctx, args...)
+	res, err := x.mod.ExportedFunction(name).Call(context.Background(), args...)
 	if err != nil {
 		return 0, fmt.Errorf("tswasm: %s: %w", name, err)
 	}
@@ -208,30 +228,68 @@ func (x *runtime) loadNames(l Lang) (*names, error) {
 }
 
 // Parse parses src. A file with syntax errors still returns a tree; check
-// Nodes[0].HasError().
-func Parse(l Lang, src []byte) (*Tree, error) {
+// Nodes[0].HasError(). When ctx ends, Parse stops waiting and returns an
+// error that wraps ctx.Err().
+func Parse(ctx context.Context, l Lang, src []byte) (*Tree, error) {
 	if l >= nlang {
 		return nil, fmt.Errorf("tswasm: unknown language %d", l)
+	}
+	select {
+	case sem <- struct{}{}:
+	case <-ctx.Done():
+		return nil, fmt.Errorf("tswasm: %w", ctx.Err())
+	}
+	defer func() { <-sem }()
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("tswasm: %w", err)
+	}
+	if abandoned.Load() >= maxAbandoned {
+		return nil, fmt.Errorf("tswasm: %d earlier parses are still running after their deadline", maxAbandoned)
 	}
 	x, err := get()
 	if err != nil {
 		return nil, err
 	}
-	x.mu.Lock()
-	defer x.mu.Unlock()
+	type result struct {
+		t   *Tree
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		t, err := x.run(l, src)
+		done <- result{t, err}
+	}()
+	select {
+	case r := <-done:
+		return r.t, r.err
+	case <-ctx.Done():
+		// The module cannot be interrupted, so let this parse finish on its
+		// own instance and give the next Parse a new one.
+		inst = nil
+		abandoned.Add(1)
+		go func() {
+			<-done
+			x.mod.Close(context.Background()) //nolint:errcheck
+			abandoned.Add(-1)
+		}()
+		return nil, fmt.Errorf("tswasm: parse: %w", ctx.Err())
+	}
+}
 
-	res, err := x.alloc.Call(x.ctx, uint64(len(src)+4))
+func (x *runtime) run(l Lang, src []byte) (*Tree, error) {
+	ctx := context.Background()
+	res, err := x.alloc.Call(ctx, uint64(len(src)+4))
 	if err != nil || res[0] == 0 {
 		return nil, fmt.Errorf("tswasm: alloc %d bytes: %v", len(src), err)
 	}
 	buf := uint32(res[0])
-	defer x.free.Call(x.ctx, uint64(buf)) //nolint:errcheck
+	defer x.free.Call(ctx, uint64(buf)) //nolint:errcheck
 	countPtr := buf + uint32(len(src))
 	mem := x.mod.Memory()
 	if !mem.Write(buf, src) {
 		return nil, fmt.Errorf("tswasm: write source")
 	}
-	res, err = x.parse.Call(x.ctx, uint64(l), uint64(buf), uint64(len(src)), uint64(countPtr))
+	res, err = x.parse.Call(ctx, uint64(l), uint64(buf), uint64(len(src)), uint64(countPtr))
 	if err != nil {
 		return nil, fmt.Errorf("tswasm: parse: %w", err)
 	}
