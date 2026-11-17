@@ -1,7 +1,42 @@
 {
   "id": "jev-1.14",
-  "models": ["jev-1.14"],
-  "weights": { "impact": 0.45, "uncertainty": 0.15, "impact_x_uncertainty": 0.1, "flags": 0.3, "history": 0.0 },
-  "thresholds": { "medium": 0.45, "high": 0.75 },
-  "notes": "Placeholder until the offline evaluation fits it."
+  "models": [
+    "jev-1.14"
+  ],
+  "weights": {
+    "flags": 0,
+    "history": 0,
+    "impact": 0.2,
+    "impact_x_uncertainty": 0,
+    "size": 0.7,
+    "uncertainty": 0.1
+  },
+  "thresholds": {
+    "medium": 0.872,
+    "high": 0.872
+  },
+  "overrides": [
+    {
+      "question": "weakens_auth",
+      "min": 0.8,
+      "tier": "high"
+    },
+    {
+      "question": "destroys_data",
+      "min": 0.9,
+      "tier": "high"
+    },
+    {
+      "question": "impact",
+      "min": 2.8,
+      "tier": "high"
+    },
+    {
+      "question": "impact",
+      "min": 2.5,
+      "tier": "medium"
+    }
+  ],
+  "fitted_on": "728 changes: the oldest 60% of repo B, repo A",
+  "notes": "Fitted by brisk-eval score. Features: impact and uncertainty are Jev scores / 3, flags is the largest yes/no answer, history is prior fixes to the changed files."
 }

@@ -1,7 +1,38 @@
 {
   "id": "default",
   "models": [],
-  "weights": { "impact": 0.45, "uncertainty": 0.15, "impact_x_uncertainty": 0.1, "flags": 0.3, "history": 0.0 },
-  "thresholds": { "medium": 0.45, "high": 0.75 },
-  "notes": "Hand-set starting point for models without a fitted table. Not fitted on data."
+  "weights": {
+    "impact": 0.45,
+    "uncertainty": 0.15,
+    "impact_x_uncertainty": 0.1,
+    "flags": 0.3,
+    "history": 0.0
+  },
+  "thresholds": {
+    "medium": 0.45,
+    "high": 0.75
+  },
+  "notes": "Hand-set starting point for models without a fitted table. Not fitted on data.",
+  "overrides": [
+    {
+      "question": "weakens_auth",
+      "min": 0.8,
+      "tier": "high"
+    },
+    {
+      "question": "destroys_data",
+      "min": 0.9,
+      "tier": "high"
+    },
+    {
+      "question": "impact",
+      "min": 2.8,
+      "tier": "high"
+    },
+    {
+      "question": "impact",
+      "min": 2.5,
+      "tier": "medium"
+    }
+  ]
 }
