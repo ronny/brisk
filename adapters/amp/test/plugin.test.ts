@@ -28,17 +28,21 @@ beforeAll(async () => {
 	dir = await mkdtemp(join(tmpdir(), 'brisk-fake-'))
 	bin = join(dir, 'brisk')
 	await writeFile(join(dir, 'floor.json'), JSON.stringify(floor))
+	await writeFile(join(dir, 'floor-rec.json'), JSON.stringify({ ...floor, agent_review: { recommended: true, reason: 'r', plan: [] } }))
 	await writeFile(
 		bin,
 		`#!/usr/bin/env bash
 echo "$*" >> "${dir}/args.log"
-for a in "$@"; do case "$prev" in --answers) ans="$a"; cp "$a" "${dir}/answers.json";; --session) cp "$a" "${dir}/session.json";; --backend) backend="$a";; esac; prev="$a"; done
+for a in "$@"; do case "$prev" in --answers) ans="$a"; cp "$a" "${dir}/answers.json"; cat "$a" >> "${dir}/answers.log"; echo >> "${dir}/answers.log";; --session) cp "$a" "${dir}/session.json";; --backend) backend="$a";; esac; prev="$a"; done
 [ -n "$FAKE_FAIL" ] && { echo "boom" >&2; exit 1; }
+[ -n "$FAKE_FAIL_REVIEW" ] && [ -n "$ans" ] && grep -q review_answers "$ans" && { echo "answers are for request r0" >&2; exit 1; }
 if [ -n "$ans" ]; then
   model=$(sed -n 's/.*"model":"\\([^"]*\\)".*/\\1/p' "$ans")
-  sed "s/\\"tier\\":\\"medium\\"/\\"tier\\":\\"high\\"/; s/\\"backend\\":\\"rules-only\\"/\\"backend\\":\\"host\\",\\"model\\":\\"$model\\"/" "${dir}/floor.json"
+  src="${dir}/floor.json"; [ -n "$FAKE_RECOMMEND" ] && src="${dir}/floor-rec.json"
+  sed "s/\\"tier\\":\\"medium\\"/\\"tier\\":\\"high\\"/; s/\\"backend\\":\\"rules-only\\"/\\"backend\\":\\"host\\",\\"model\\":\\"$model\\"/" "$src"
 elif [ "$backend" = host ]; then
   rq=''; [ -n "$FAKE_REVIEW" ] && rq=',"review_questions":{"access_checks":{"type":"score","instructions":"r","criteria":["x"]}}'
+  [ -n "$FAKE_REVIEW_WHEN" ] && rq="$rq"',"review_when":"'"$FAKE_REVIEW_WHEN"'"'
   printf '{"schema":"brisk.host-request/v1","request_id":"r1","model":"typesafe/jev","state":"S","questions":{"impact":{"type":"score","instructions":"i","criteria":["a","b"]}}%s,"floor_assessment":%s}' "$rq" "$(cat ${dir}/floor.json)"
 else
   cat "${dir}/floor.json"
@@ -83,29 +87,68 @@ describe('assess', () => {
 		expect(summary(r.assessment, r.degraded)).toContain('rules only')
 	})
 
-	test('review questions get their own decide call and come back as review_answers', async () => {
+	describe('review questions', () => {
 		const asked: string[][] = []
 		const decide = async (req: { questions: Record<string, unknown> }) => {
 			asked.push(Object.keys(req.questions))
 			return { model: 'jev-1.14.0', answers: Object.fromEntries(Object.keys(req.questions).map((k) => [k, { type: 'score', score: 2 }])) }
 		}
-		const env = { ...process.env, FAKE_REVIEW: '1' }
-		await assess({ bin, cwd: dir, mode: 'amp', env, decide })
-		expect(asked.sort()).toEqual([['access_checks'], ['impact']])
-		const sent = JSON.parse(await readFile(join(dir, 'answers.json'), 'utf8'))
-		expect(Object.keys(sent.answers)).toEqual(['impact'])
-		expect(sent.review_answers).toEqual({ access_checks: { type: 'score', score: 2 } })
+		const runs = async () =>
+			(await readFile(join(dir, 'answers.log'), 'utf8')).trim().split('\n').map((l) => JSON.parse(l))
+		const go = async (env: Record<string, string>, d = decide) => {
+			asked.length = 0
+			await rm(join(dir, 'answers.log'), { force: true })
+			const r = await assess({ bin, cwd: dir, mode: 'amp', env: { ...process.env, FAKE_REVIEW: '1', ...env }, decide: d })
+			return { r, runs: await runs() }
+		}
 
-		// A failed review call leaves the full plan: no review_answers, not degraded.
-		const r = await assess({
-			bin, cwd: dir, mode: 'amp', env,
-			decide: async (req) => {
-				if ('access_checks' in req.questions) throw new Error('no')
-				return { model: 'jev-1.14.0', answers: {} }
-			},
+		test('recommended (default): not asked when no review is recommended', async () => {
+			const { runs: rs } = await go({})
+			expect(asked).toEqual([['impact']])
+			expect(rs.length).toBe(1)
+			expect(rs[0].review_answers).toBeUndefined()
 		})
-		expect(r.degraded).toBeUndefined()
-		expect(JSON.parse(await readFile(join(dir, 'answers.json'), 'utf8')).review_answers).toBeUndefined()
+
+		test('recommended: asked after the answers recommend a review, then brisk runs again with them', async () => {
+			const { r, runs: rs } = await go({ FAKE_REVIEW_WHEN: 'recommended', FAKE_RECOMMEND: '1' })
+			expect(asked).toEqual([['impact'], ['access_checks']])
+			expect(rs.map((x) => x.review_answers)).toEqual([undefined, { access_checks: { type: 'score', score: 2 } }])
+			expect(rs.map((x) => x.request_id)).toEqual(['r1', 'r1'])
+			expect(r.assessment.agent_review?.recommended).toBe(true)
+		})
+
+		test('always: asked alongside the main call, one brisk run', async () => {
+			const { runs: rs } = await go({ FAKE_REVIEW_WHEN: 'always' })
+			expect(asked.slice().sort()).toEqual([['access_checks'], ['impact']])
+			expect(rs.length).toBe(1)
+			expect(Object.keys(rs[0].answers)).toEqual(['impact'])
+			expect(rs[0].review_answers).toEqual({ access_checks: { type: 'score', score: 2 } })
+		})
+
+		test('if the run with review answers fails, the first assessment stands', async () => {
+			const { r, runs: rs } = await go({ FAKE_REVIEW_WHEN: 'recommended', FAKE_RECOMMEND: '1', FAKE_FAIL_REVIEW: '1' })
+			expect(rs.length).toBe(2)
+			expect(r.assessment.tier).toBe('high')
+			expect(r.degraded).toBeUndefined()
+		})
+
+		test('partial review answers are sent as review_error; an unknown review_when is treated as recommended', async () => {
+			const { runs: rs } = await go({ FAKE_REVIEW_WHEN: 'lazy', FAKE_RECOMMEND: '1' }, async () => ({ model: 'jev-1.14.0', answers: {} }))
+			expect(rs.length).toBe(2)
+			expect(rs[1].review_answers).toBeUndefined()
+			expect(rs[1].review_error).toBe('no answers for access_checks')
+		})
+
+		test('a failed review call is sent as review_error and is not degraded', async () => {
+			const { r, runs: rs } = await go({ FAKE_REVIEW_WHEN: 'recommended', FAKE_RECOMMEND: '1' }, async (req) => {
+				if ('access_checks' in req.questions) throw new Error('Jev busy')
+				return { model: 'jev-1.14.0', answers: {} }
+			})
+			expect(r.degraded).toBeUndefined()
+			expect(rs.length).toBe(2)
+			expect(rs[1].review_answers).toBeUndefined()
+			expect(rs[1].review_error).toBe('Jev busy')
+		})
 	})
 
 	test('binary mode runs brisk once with --backend auto', async () => {

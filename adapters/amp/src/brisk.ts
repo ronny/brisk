@@ -58,6 +58,8 @@ export interface Assessment {
 		diff_hash: string
 		/** The preset the project's base .brisk.yaml chose, if any. */
 		preset?: string
+		/** Whether Jev's area scores shaped the review plan. */
+		review_plan?: { status?: 'tailored' | 'not_asked' | 'pending' | 'failed'; tailored?: boolean; error?: string; [k: string]: unknown }
 		[k: string]: unknown
 	}
 }
@@ -70,6 +72,8 @@ interface HostRequest {
 	questions: Record<string, unknown>
 	/** One relevance question per review area; answered separately, see README. */
 	review_questions?: Record<string, unknown>
+	/** When to answer review_questions: only once a review is recommended (default), or always. */
+	review_when?: 'recommended' | 'always'
 	floor_assessment: Assessment
 }
 
@@ -108,7 +112,7 @@ export interface RunResult {
 export class BriskError extends Error {}
 
 /** How long the optional review-plan answers may add to an assessment. */
-const REVIEW_TIMEOUT_MS = 8_000
+const REVIEW_TIMEOUT_MS = 5_000
 
 function exec(bin: string, args: string[], o: RunOptions): Promise<string> {
 	return new Promise((resolve, reject) => {
@@ -163,36 +167,68 @@ export async function assess(o: RunOptions): Promise<RunResult> {
 		if (first.schema === 'brisk.assessment/v1') return { assessment: first }
 		if (!o.decide) throw new BriskError('brisk asked questions but no decision model is available')
 
-		// The review questions go in their own call so they cannot change the
-		// calibrated answers. Without their answers brisk keeps the full plan,
-		// so a failure here is not an error.
+		// The review questions (one relevance score per plan area) go in their
+		// own call so they cannot change the calibrated answers. With
+		// review_when "recommended" they are asked only when the answers lead to
+		// a recommended review; "always" asks them alongside the main call.
+		// Without their answers brisk keeps its full plan, so a failure is
+		// reported as review_error, not as an error.
 		const decide = o.decide
-		const review = first.review_questions
-			? Promise.race([
-					decide({ model: first.model, state: first.state, questions: first.review_questions }),
-					new Promise<undefined>((r) => void (setTimeout(r, REVIEW_TIMEOUT_MS) as { unref?: () => void }).unref?.()),
-				]).catch(() => undefined)
-			: undefined
+		const when = first.review_questions ? (first.review_when === 'always' ? 'always' : 'recommended') : undefined
+		const askReview = (): Promise<{ answers?: Record<string, unknown>; error?: string }> => {
+			let timer: ReturnType<typeof setTimeout> | undefined
+			return Promise.race([
+				decide({ model: first.model, state: first.state, questions: first.review_questions! }),
+				new Promise<never>((_, reject) => {
+					timer = setTimeout(() => reject(new Error(`timed out after ${REVIEW_TIMEOUT_MS / 1000} s`)), REVIEW_TIMEOUT_MS)
+				}),
+			])
+				.then(
+					(r) => {
+						// brisk counts partial answers as failed; say which are missing.
+						const missing = Object.keys(first.review_questions!).filter((k) => !(k in (r.answers ?? {})))
+						return missing.length ? { error: `no answers for ${missing.join(', ')}` } : { answers: r.answers }
+					},
+					(e) => ({ error: errorText(e) }),
+				)
+				.finally(() => clearTimeout(timer))
+		}
+		const early = when === 'always' ? askReview() : undefined
 		let answers
 		try {
 			answers = await decide({ model: first.model, state: first.state, questions: first.questions })
 		} catch (e) {
 			return { assessment: first.floor_assessment, degraded: `Amp decision model failed: ${errorText(e)}` }
 		}
-		const reviewAnswers = (await review)?.answers
 		const f = join(dir, 'answers.json')
-		await writeFile(
-			f,
-			JSON.stringify({
-				schema: 'brisk.host-answers/v1',
-				request_id: first.request_id,
-				model: answers.model,
-				answers: answers.answers,
-				...(reviewAnswers ? { review_answers: reviewAnswers } : {}),
-			}),
-		)
-		const final = parse(await exec(o.bin, [...args, '--answers', f], o))
-		if (final.schema !== 'brisk.assessment/v1') throw new BriskError('brisk asked questions again after answers')
+		const finish = async (review?: { answers?: Record<string, unknown>; error?: string }): Promise<Assessment> => {
+			await writeFile(
+				f,
+				JSON.stringify({
+					schema: 'brisk.host-answers/v1',
+					request_id: first.request_id,
+					model: answers.model,
+					answers: answers.answers,
+					...(review?.answers ? { review_answers: review.answers } : {}),
+					...(review?.error ? { review_error: review.error } : {}),
+				}),
+			)
+			const doc = parse(await exec(o.bin, [...args, '--answers', f], o))
+			if (doc.schema !== 'brisk.assessment/v1') throw new BriskError('brisk asked questions again after answers')
+			return doc
+		}
+		let final: Assessment
+		if (early) final = await finish(await early)
+		else {
+			final = await finish()
+			if (when === 'recommended' && final.agent_review?.recommended) {
+				// Tailoring is optional: if this run fails (for example brisk
+				// refuses because the files changed meanwhile), keep the
+				// assessment already made.
+				const untailored = final
+				final = await finish(await askReview()).catch(() => untailored)
+			}
+		}
 		return { assessment: final }
 	} finally {
 		await rm(dir, { recursive: true, force: true })
