@@ -19,10 +19,6 @@ h1{font-size:30px;margin:0 0 4px;letter-spacing:-.02em}
 h2{font-size:22px;margin:0 0 4px;letter-spacing:-.01em}
 h3{font-size:16px;margin:18px 0 6px}
 .lede{color:var(--muted);margin:0 0 12px;max-width:820px}
-.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:13px;color:var(--muted);align-items:center}
-.sw{display:inline-block;width:22px;height:14px;border-radius:4px;vertical-align:-2px;margin-right:5px;border:1.5px solid #9a988f;background:#fff}
-.sw.local{border:1.5px dashed var(--local);background:var(--local-bg)}
-.sw.plan{border:1.5px dashed var(--plan);background:var(--plan-bg)}
 nav{position:sticky;top:0;z-index:20;background:rgba(246,245,242,.94);backdrop-filter:blur(6px);border-bottom:1px solid var(--line)}
 nav .in{max-width:1180px;margin:0 auto;padding:8px 32px;display:flex;gap:6px;flex-wrap:wrap}
 nav a{text-decoration:none;padding:5px 12px;border-radius:999px;font-size:14px;color:var(--muted)}
@@ -53,7 +49,6 @@ section{scroll-margin-top:50px;max-width:1180px;margin:0 auto;padding:30px 32px 
 .tag.rule{background:#ecebe6;color:#55534c}
 .tag.language{background:#e5f0f7;color:#2d6687}
 .tag.question{background:#efe8f6;color:#6b4596}
-.local-box{border:1.5px dashed var(--local)!important;background:var(--local-bg)!important}
 .plan-box{border:1.5px dashed var(--plan)!important;background:var(--plan-bg)!important}
 svg text{font-family:system-ui,-apple-system,"Segoe UI",sans-serif}
 .flow svg{width:100%;height:auto;display:block}
@@ -92,7 +87,6 @@ pre.out{margin:0;background:#1f2328;color:#e6e6e6;border-radius:8px;padding:10px
 .chip.hit.t1{border-color:var(--med);background:var(--med-bg)}
 .chip.hit.t2{border-color:var(--high);background:var(--high-bg)}
 .chip .lvl{float:right;margin-left:8px;font-size:11px;font-weight:600}
-.chip.local{border-style:dashed;border-color:var(--local)}
 .grouph{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:12px 0 6px}
 .kv{display:grid;grid-template-columns:150px 1fr;gap:4px 12px;font-size:13.5px}
 .kv div:nth-child(odd){color:var(--muted)}
@@ -149,11 +143,6 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
 <header>
   <h1>How brisk works</h1>
   <p class="lede">brisk rates a code change <span class="tier low">Low</span> <span class="tier medium">Medium</span> <span class="tier high">High</span> with up to three reasons. Rules set a floor. A decision model, TypeSafe's Jev, can only raise the tier above that floor. The example is <b>shelf</b>, a repo with a Go backend and a React/TypeScript frontend. Every example assessment on this page is real output from brisk (the core thread's local <span class="mono">main</span>, 5cf07c3) and Jev (<span class="mono">jev-1.14.0</span>, through Amp).</p>
-  <div class="legend">
-    <span><span class="sw"></span>on <span class="mono">main</span> (fbdc84c)</span>
-    <span><span class="sw local"></span>done locally, not pushed yet</span>
-    <span><span class="sw plan"></span>planned or in progress</span>
-  </div>
 </header>
 <nav><div class="in">
   <a href="#flows">1 · Flows</a>
@@ -215,8 +204,8 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
 <!-- ============================================================ LEVERS -->
 <section id="levers">
   <h2>3 · Levers</h2>
-  <p class="lede">A team sets its policy in <span class="mono">.brisk.yaml</span>, read from the <b>base</b> commit. Pick a preset, then turn any lever. The six example changes are re-scored live with their real Jev answers. <span class="tag local">local</span> presets and levers are built on the core thread's local <span class="mono">main</span> (5cf07c3), not pushed.</p>
-  <div class="card local-box" id="lv-preset"></div>
+  <p class="lede">A team sets its policy in <span class="mono">.brisk.yaml</span>, read from the <b>base</b> commit. Pick a preset, then turn any lever. The six example changes are re-scored live with their real Jev answers.</p>
+  <div class="card" id="lv-preset"></div>
   <div class="grid2">
     <div class="card" id="lv-share"></div>
     <div class="card" id="lv-ar"></div>
@@ -3050,7 +3039,7 @@ const RULES = {
     ['lang:sql_changed',0,'Changes SQL queries'],
   ],
   session:[['session:verification_failed',1,'The last test, type check, or lint run failed']],
-  local:[
+  hygiene:[
     ['generated_without_source',1,'Claims to be generated, but no generator input changed'],
     ['gitignore_hides_code',1,'The change hides code with .gitignore'],
     ['generated_hand_edited',1,'The agent hand-edited a generated file'],
@@ -3129,17 +3118,15 @@ function drawFlow(spec, sel){
   }
   for (const n of spec.nodes){
     const x=nx(n), y=ny(n), h=n.h||BH;
-    const st = n.status||'main';
-    const fill = st==='local'?'#e6eefc':st==='plan'?'#f1e8fb':n.fill||'#fff';
-    const stroke = st==='local'?'#2a66d9':st==='plan'?'#8448cc':n.stroke||'#b4b1a8';
+    const fill = n.fill||'#fff';
+    const stroke = n.stroke||'#b4b1a8';
     s += `<g class="node ${sel===n.id?'sel':''}" data-id="${n.id}" tabindex="0" role="button" aria-label="${esc(n.title)}">`;
-    s += `<rect class="box" x="${x}" y="${y}" width="${BW}" height="${h}" rx="10" fill="${fill}" stroke="${stroke}" stroke-width="1.6" ${st!=='main'?'stroke-dasharray="6 4"':''}/>`;
+    s += `<rect class="box" x="${x}" y="${y}" width="${BW}" height="${h}" rx="10" fill="${fill}" stroke="${stroke}" stroke-width="1.6"/>`;
     if (n.icon) s += `<text x="${x+12}" y="${y+24}" font-size="16">${n.icon}</text>`;
     const avail = BW-(n.icon?34:12)-8, fsz = Math.min(13.5, avail/(n.title.length*0.62));
     s += `<text x="${x+(n.icon?34:12)}" y="${y+23}" font-size="${fsz.toFixed(1)}" font-weight="650" fill="#1c1c1e">${esc(n.title)}</text>`;
     let ty=y+43;
     for (const line of n.sub){ for (const w of wrapText(line, 26)){ s += `<text x="${x+12}" y="${ty}" font-size="11.5" fill="#55534c">${esc(w)}</text>`; ty+=15; } }
-    if (n.badge) s += `<g><rect x="${x+BW-58}" y="${y-9}" width="54" height="17" rx="8" fill="#2a66d9"/><text x="${x+BW-31}" y="${y+3}" text-anchor="middle" font-size="10.5" fill="#fff" font-weight="600">+ local</text></g>`;
     if (n.step) s += `<g><circle cx="${x+BW-12}" cy="${y+h-12}" r="9" fill="#24292f"/><text x="${x+BW-12}" y="${y+h-8}" text-anchor="middle" font-size="10.5" fill="#fff" font-weight="700">${n.step}</text></g>`;
     s += `</g>`;
   }
@@ -3150,24 +3137,24 @@ const FLOWS = {
   cli:{label:'CLI and CI', tab:'CLI & CI', nodes:[
     {id:'chg',c:0,r:0,icon:'⎇',title:'The change',sub:['base..head, or the working tree with untracked files','base = merge base with origin/HEAD'],step:1,
       d:'<span class="mono">brisk assess [--base REF] [--head REF] [--session session.json]</span>. Without <span class="mono">--head</span>, brisk assesses the working tree, including untracked files, and never touches the real index.'},
-    {id:'git',c:1,r:0,icon:'±',title:'Collect the diff',sub:['hunks, old and new file per path','diff_hash'],step:1,badge:true,
-      d:'One git call per need; everything later reads from this change set. <span class="tag local">local</span> git now ignores the repo\'s attributes, clean filters, and fsmonitor (needs git 2.42+), so a change cannot hide its own diff with <span class="mono">*.sql -diff</span>. Code hidden only by the change\'s <span class="mono">.gitignore</span> edits is assessed and flagged <span class="mono">gitignore_hides_code</span>.'},
-    {id:'lang',c:2,r:0,icon:'🌳',title:'Tree-sitter findings',sub:['Go, TS, TSX parsed in WASM','facts on changed lines only'],step:3,badge:true,
-      d:'Language backends report facts such as <span class="mono">auth_logic_changed</span> or <span class="mono">exported_signature_changed</span>. The engine decides what each fact is worth. Tree-sitter grammars are compiled to WASM and run on wazero, so the binary needs no cgo. <span class="tag local">local</span> a new file that only <i>claims</i> to be generated is analysed anyway.'},
-    {id:'ctx',c:3,r:0,icon:'📁',title:'Project context',sub:['.brisk.yaml from the base commit','CODEOWNERS and 90-day history'],badge:true,
-      d:'<span class="mono">.brisk.yaml</span> is read from the <b>base</b> commit, so a change cannot loosen the rules that judge it. History gives commits, authors, earlier fixes, and reverts per file. <span class="tag local">local</span> the file now also holds the team\'s policy: a preset plus levers such as <span class="mono">high_share</span>, <span class="mono">overrides</span>, <span class="mono">rule_tiers</span>, and <span class="mono">agent_review</span>. See Levers.'},
+    {id:'git',c:1,r:0,icon:'±',title:'Collect the diff',sub:['hunks, old and new file per path','diff_hash'],step:1,
+      d:'One git call per need; everything later reads from this change set. brisk runs git without the repo\'s attributes, clean filters, and fsmonitor (needs git 2.42+), so a change cannot hide its own diff with <span class="mono">*.sql -diff</span>. Code hidden only by the change\'s <span class="mono">.gitignore</span> edits is assessed and flagged <span class="mono">gitignore_hides_code</span>.'},
+    {id:'lang',c:2,r:0,icon:'🌳',title:'Tree-sitter findings',sub:['Go, TS, TSX parsed in WASM','facts on changed lines only'],step:3,
+      d:'Language backends report facts such as <span class="mono">auth_logic_changed</span> or <span class="mono">exported_signature_changed</span>. The engine decides what each fact is worth. Tree-sitter grammars are compiled to WASM and run on wazero, so the binary needs no cgo. A new file that only <i>claims</i> to be generated is analysed anyway.'},
+    {id:'ctx',c:3,r:0,icon:'📁',title:'Project context',sub:['.brisk.yaml from the base commit','CODEOWNERS and 90-day history'],
+      d:'<span class="mono">.brisk.yaml</span> is read from the <b>base</b> commit, so a change cannot loosen the rules that judge it. History gives commits, authors, earlier fixes, and reverts per file. The file also holds the team\'s policy: a preset plus levers such as <span class="mono">high_share</span>, <span class="mono">overrides</span>, <span class="mono">rule_tiers</span>, and <span class="mono">agent_review</span>. See Levers.'},
     {id:'rules',c:4,r:0,icon:'📏',title:'Rules → floor',sub:['path, line, finding, session rules','floor = highest rule hit'],step:2,
       d:'Deterministic rules on paths, added lines, structural findings, and the session record. Each hit has a tier; the floor is the highest. Untrusted text such as comments cannot lower it.<br><br>The floor never skips Jev. Rules run first, and their hits become per-file tags in the state Jev reads. The floor then waits at <span class="mono">max(floor, model)</span> while brisk asks Jev, even when the floor is already High. Jev\'s answers still add reasons, decide <span class="mono">agent_review</span>, and score the review plan.'},
-    {id:'state',c:4,r:1,icon:'📨',title:'State + questions',sub:['task, summary, tags, findings, verification, clipped diff'],step:5,badge:true,
-      d:'The state is what Jev reads. It is built for a fixed character budget. <span class="tag local">local</span> detected secrets are redacted everywhere before the request, and key and credential files are left out entirely.'},
-    {id:'jev',c:3,r:1,icon:'⚖',title:'Jev answers',sub:['OpenRouter systemone API','+ a 2nd call scoring review areas'],step:5,badge:true,
-      d:'Four yes/no questions and two 0–3 scores. With <span class="mono">--backend auto</span>, brisk calls OpenRouter when <span class="mono">OPENROUTER_API_KEY</span> is set. <span class="tag local">local</span> the host <span class="mono">request_id</span> now also covers the base commit and the whole diff hash, so stale answers are refused. <span class="tag local">local</span> a second call on the same state scores each review-plan area 0–3; it is kept apart so the calibrated questions and their recordings do not change.'},
-    {id:'cal',c:2,r:1,icon:'∑',title:'Calibrate',sub:['features × weights → model risk','thresholds, then overrides'],step:6,badge:true,
-      d:'<span class="mono">calibration/jev-1.14.json</span> turns the answers plus diff size into a 0–1 model risk, compares it with the thresholds, then applies overrides that can only raise the model tier. <span class="tag local">local</span> the preset or <span class="mono">high_share</span> can move the thresholds, using risk quantiles stored in the calibration.'},
+    {id:'state',c:4,r:1,icon:'📨',title:'State + questions',sub:['task, summary, tags, findings, verification, clipped diff'],step:5,
+      d:'The state is what Jev reads. It is built for a fixed character budget. Detected secrets are redacted everywhere before the request, and key and credential files are left out entirely.'},
+    {id:'jev',c:3,r:1,icon:'⚖',title:'Jev answers',sub:['OpenRouter systemone API','+ a 2nd call scoring review areas'],step:5,
+      d:'Four yes/no questions and two 0–3 scores. With <span class="mono">--backend auto</span>, brisk calls OpenRouter when <span class="mono">OPENROUTER_API_KEY</span> is set. The host <span class="mono">request_id</span> covers the base commit and the whole diff hash, so stale answers are refused. A second call on the same state scores each review-plan area 0–3; it is kept apart so the calibrated questions and their recordings do not change.'},
+    {id:'cal',c:2,r:1,icon:'∑',title:'Calibrate',sub:['features × weights → model risk','thresholds, then overrides'],step:6,
+      d:'<span class="mono">calibration/jev-1.14.json</span> turns the answers plus diff size into a 0–1 model risk, compares it with the thresholds, then applies overrides that can only raise the model tier. The preset or <span class="mono">high_share</span> can move the thresholds, using risk quantiles stored in the calibration.'},
     {id:'max',c:1,r:1,icon:'⤒',title:'max(floor, model)',sub:['the model can only raise the tier'],step:7,fill:'#fff8e8',stroke:'#c98200',
       d:'The red line carries the floor here directly; it is the same run, not a parallel path. brisk always asks Jev (unless the change has no files), then takes the higher of the floor and the model tier. Whatever Jev says, the tier never goes below the floor. If Jev fails, the tier is the floor.'},
-    {id:'out',c:0,r:1,icon:'⇥',title:'Output',sub:['tier, ≤3 reasons, action','agent_review + review plan'],step:9,badge:true,
-      d:'Exit codes: 0 assessed, 1 error, 2 usage error, 3 tier at or above <span class="mono">--fail-on</span>. In CI, <span class="mono">brisk assess --fail-on high</span> fails the job on High. <span class="tag local">local</span> next to the tier, <span class="mono">agent_review {recommended, reason}</span> says whether to run an agent review, and the action text comes from the preset. <span class="mono">agent_review.plan</span> lists the areas a reviewer should check, with evidence and checks; see step 9.'},
+    {id:'out',c:0,r:1,icon:'⇥',title:'Output',sub:['tier, ≤3 reasons, action','agent_review + review plan'],step:9,
+      d:'Exit codes: 0 assessed, 1 error, 2 usage error, 3 tier at or above <span class="mono">--fail-on</span>. In CI, <span class="mono">brisk assess --fail-on high</span> fails the job on High. Next to the tier, <span class="mono">agent_review {recommended, reason}</span> says whether to run an agent review, and the action text comes from the preset. <span class="mono">agent_review.plan</span> lists the areas a reviewer should check, with evidence and checks; see step 9.'},
     {id:'fb',c:3,r:1.78,h:84,title:'Jev fails?',sub:['→ rules only;','provenance.degraded says why'],fill:'#f6f5f2',
       d:'Any backend error falls back to the rules-only assessment. The tier is then the floor, and <span class="mono">provenance.degraded</span> records the reason.'},
   ], edges:[
@@ -3181,10 +3168,10 @@ const FLOWS = {
     {id:'ev',c:0,r:0,icon:'⚡',title:'Amp event',sub:['a turn ended with edits or shell commands','or Ship / Push to Branch'],
       d:'Runs on <span class="mono">agent.end</span> when the turn edited files or ran shell commands, on <span class="mono">changes.prompt</span>, and on <span class="mono">agent.start</span> for a Ship or Push to Branch turn.'},
     {id:'sess',c:1,r:0,icon:'🧾',title:'Session record',sub:['intent, files touched','commands + exit codes, corrections'],
-      d:'Built from the thread: the user\'s intent, edited files, shell commands with exit codes, user corrections, and the agent\'s last summary. Passed with <span class="mono">--session</span>. Messages are read in parallel <span class="tag local">local</span>.'},
+      d:'Built from the thread: the user\'s intent, edited files, shell commands with exit codes, user corrections, and the agent\'s last summary. Passed with <span class="mono">--session</span>. Messages are read in parallel.'},
     {id:'hreq',c:2,r:0,icon:'①',title:'brisk --backend host',sub:['prints state, questions, request_id','and floor_assessment'],
       d:'Step one of the host protocol. When there is nothing to ask (an empty diff), it prints a final assessment instead.'},
-    {id:'dec',c:3,r:0,icon:'⚖',title:'amp.ai.decide ×2',sub:['calibrated questions','+ review_questions, same state'],badge:true,
+    {id:'dec',c:3,r:0,icon:'⚖',title:'amp.ai.decide ×2',sub:['calibrated questions','+ review_questions, same state'],
       d:'Amp\'s own route to Jev; no OpenRouter key needed. Answers match OpenRouter\'s to within 0.03 on average; 0.6% of tiers differ between the routes.'},
     {id:'ans',c:4,r:0,icon:'📄',title:'answers.json',sub:['same request_id, model','answers + review_answers'],
       d:'A <span class="mono">brisk.host-answers/v1</span> file. brisk refuses answers whose <span class="mono">request_id</span> does not match.'},
@@ -3196,7 +3183,7 @@ const FLOWS = {
       d:'Every tier: the label. Medium and High: a "Review risky changes" quick action and a line added to the Ship and Push to Branch prompt. When brisk recommends an agent review, at any tier, "Start agent review" takes the quick action\'s place.'},
     {id:'conf',c:1,r:1,icon:'✋',title:'Confirm before Ship',sub:['opt-in: confirmShipOnHigh','High or unknown; a person answers'],step:10,
       d:'Off by default. A dialog "Ship a High-risk change?" with "Ship anyway". Only a person can answer it; declining cancels the turn. Settings are read only from user and managed settings, never from the repo.'},
-    {id:'rev',c:0,r:1,icon:'🔍',title:'Guided agent review',sub:['follows agent_review.plan','mode chosen by preset'],status:'local',step:10,
+    {id:'rev',c:0,r:1,icon:'🔍',title:'Guided agent review',sub:['follows agent_review.plan','mode chosen by preset'],step:10,
       d:'When brisk sets <span class="mono">agent_review.recommended</span>, the plugin offers "Start agent review", makes sure one ran before Ship, runs one on every Ship, or starts one as soon as the turn ends, depending on the mode. The review message hands a fresh subagent brisk\'s plan, area by area, and asks for a verdict on every check. See step 9 and Levers.'},
     {id:'fb2',c:2,r:1.78,h:84,title:'Jev fails?',sub:['→ show floor_assessment,','"rules only"'],fill:'#f6f5f2',
       d:'If <span class="mono">amp.ai.decide</span> fails (for example the workspace disabled Jev), the plugin shows the rules-only floor from step one and says so. If brisk itself fails, the label becomes <span class="mono">risk-unknown</span>.'},
@@ -3223,7 +3210,7 @@ const FLOWS = {
     {id:'tab',c:2,r:1,icon:'🗂',title:'calibration/jev-1.14.json',sub:['weights, thresholds, overrides','one table per model version'],fill:'#fff8e8',stroke:'#c98200',
       d:'Used by every assessment whose answering model normalises to <span class="mono">jev-1.14</span>. Other models get the hand-set <span class="mono">default.json</span>. Overrides are hand-set.'},
     {id:'meas',c:1,r:1,icon:'📊',title:'Measure on test',sub:['recall, flag rate, bad rate per tier','PR-AUC vs baselines'],
-      d:'High catches 41% of bad changes while flagging 19%. Bad rate rises 7.4% → 15.8% → 32.3%. PR-AUC brisk 0.331 against rules only 0.283 (local, with the security fixes).'},
+      d:'High catches 41% of bad changes while flagging 19%. Bad rate rises 7.4% → 15.8% → 32.3%. PR-AUC brisk 0.331 against rules only 0.283 (with the security fixes).'},
     {id:'ci',c:0,r:1,icon:'✅',title:'CI',sub:['fixtures + injection set','replay recorded Jev answers'],
       d:'18 everyday fixtures and 10 injection cases × 3 variants replay answers from <span class="mono">testdata/answers/jev-1.14.jsonl</span>, keyed by request ID. A change to what brisk sends Jev fails CI until the recordings are refreshed. $0 per pull request.'},
   ], edges:[
@@ -3238,7 +3225,7 @@ function renderFlow(){
   $('flowsvg').innerHTML = drawFlow(f, flowSel);
   const n = f.nodes.find(n=>n.id===flowSel);
   $('flowdetail').innerHTML = n ? `<b>${esc(n.title)}.</b> ${n.d} ${n.step?`<button class="btn small" data-step="${n.step}" style="margin-left:6px">See step ${n.step} for an example →</button>`:''}`
-    : `<span class="muted small">${flowKey==='cli'?'Numbered boxes link to the step-by-step walkthrough. Blue badges mark hardening done locally and not pushed yet.':flowKey==='amp'?'The plugin runs the same binary in two steps so Amp, not brisk, talks to Jev.':'How the table that turns Jev\'s answers into a tier is made, and how CI keeps it honest.'}</span>`;
+    : `<span class="muted small">${flowKey==='cli'?'Numbered boxes link to the step-by-step walkthrough.':flowKey==='amp'?'The plugin runs the same binary in two steps so Amp, not brisk, talks to Jev.':'How the table that turns Jev\'s answers into a tier is made, and how CI keeps it honest.'}</span>`;
 }
 $('flowtabs').addEventListener('click', e=>{ const b=e.target.closest('button'); if(!b) return; flowKey=b.dataset.k; flowSel=null; renderFlow(); });
 $('flowsvg').addEventListener('click', e=>{ const g=e.target.closest('.node'); if(!g) return; flowSel=g.dataset.id; renderFlow(); });
@@ -3323,7 +3310,7 @@ function stepRules(ex){
     ${g('Line rules', RULES.line, '<span class="muted" style="text-transform:none;letter-spacing:0">— match added lines</span>')}
     ${g('Language findings', RULES.lang, '<span class="muted" style="text-transform:none;letter-spacing:0">— from tree-sitter, step 3</span>')}
     ${g('Session', RULES.session)}
-    ${g('Added locally <span class="tag local">local</span>', RULES.local, '', 'local')}
+    ${g('Change hygiene', RULES.hygiene, '<span class="muted" style="text-transform:none;letter-spacing:0">— generated files, .gitignore, nested repos</span>')}
   </div><div class="col" style="flex:1 1 240px">
     <div class="grouph">This change</div>
     ${hits.size? [...hits].map(h=>`<div style="margin:4px 0">${tierTag(TIERS[RULE_TIER[h]??0])} <span class="mono">${esc(h)}</span></div>`).join('') : '<p class="muted">No rule fired.</p>'}
@@ -3450,7 +3437,7 @@ function stepCal(ex){
     <div class="grouph">Features × weights (calibration/jev-1.14.json)</div>
     <table><tr><th>feature</th><th>from</th><th>value</th><th>weight</th><th></th></tr>${rows}<tr><td colspan="4"><b>model risk</b> <span class="muted small">(flags and history weigh 0)</span></td><td class="mono"><b>${r.toFixed(3)}</b></td></tr></table>
     ${s}
-    <p class="small muted">The fitted Medium and High thresholds are both 0.872, because rules alone already put over 40% of changes at Medium. So on this table the score raises a change only to High, and Medium comes from rules or the impact override. <span class="tag local">local</span> presets move these cut points: <span class="mono">autonomous</span> uses High ≥ 0.813, <span class="mono">strict</span> High ≥ 0.726 and Medium ≥ 0.571 (see Levers).</p>
+    <p class="small muted">The fitted Medium and High thresholds are both 0.872, because rules alone already put over 40% of changes at Medium. So on this table the score raises a change only to High, and Medium comes from rules or the impact override. Presets move these cut points: <span class="mono">autonomous</span> uses High ≥ 0.813, <span class="mono">strict</span> High ≥ 0.726 and Medium ≥ 0.571 (see Levers).</p>
   </div><div class="col" style="flex:2 1 340px">
     <div class="grouph">Overrides: a strong answer raises the model tier</div>
     <table><tr><th>answer</th><th>at least</th><th>raises to</th><th>here</th><th></th></tr>${ov}</table>
@@ -3486,7 +3473,7 @@ function stepReasons(ex){
     <div class="grouph">Reasons (at most 3, strongest first: rules before model)</div>
     ${r.length? r.map((x,i)=>`<div class="reason"><span class="n">${i+1}</span><div style="flex:1">${esc(x.text)}<br><span class="tag ${x.source}">${x.source}</span> <span class="tag">${esc(x.id)}</span> ${tierTag(x.tier)} ${(x.evidence||[]).map(e=>`<span class="mono small">${esc(e.path)}${e.start_line?':'+e.start_line:''}${e.symbol?' '+esc(e.symbol):''}</span>`).join(' ')}</div></div>`).join('') : '<p class="muted">No reasons: Low needs none.</p>'}
     <div class="grouph">Action</div><div>${esc(ex.final.action)}</div>
-    <div class="grouph">Agent review <span class="tag local">local</span></div><div class="mono small">"agent_review": ${esc(JSON.stringify(ex.final.agent_review))}</div>
+    <div class="grouph">Agent review</div><div class="mono small">"agent_review": ${esc(JSON.stringify(ex.final.agent_review))}</div>
     <div class="grouph">CLI text output</div><pre class="out">${esc(ex.text)}</pre>
   </div><div class="col" style="flex:2 1 320px">
     <div class="grouph">Provenance: what produced this</div>
@@ -3500,7 +3487,7 @@ function stepReasons(ex){
       <div>answers</div><div class="mono">${Object.entries(p.answers).map(([k,a])=>`${k}: ${(a.score??a.noul).toFixed(2)}`).join('<br>')}</div>
       <div>diff_hash</div><div class="mono">${esc(p.diff_hash.slice(0,18))}…</div>
       <div>degraded</div><div class="mono muted">— (set when Jev fails)</div>
-      <div>preset</div><div class="mono">${esc(p.preset||'')} <span class="tag local">local</span></div>
+      <div>preset</div><div class="mono">${esc(p.preset||'')}</div>
       <div>thresholds</div><div class="mono">${p.thresholds?`medium ${p.thresholds.medium}, high ${p.thresholds.high}`:''}</div>
     </div>
   </div></div>`;
@@ -3660,7 +3647,7 @@ function stepPlugin(ex){
       ${plugConfirm && t==='high' ? `<div style="margin-top:12px" class="dlg"><b>Ship a High-risk change?</b><p class="small">${esc(pSummary(exm))}</p><p class="small muted">This project asks a person to confirm before shipping High-risk or unassessed changes.</p><div class="row" style="justify-content:flex-end;gap:8px"><button class="btn">Cancel</button><button class="btn" style="background:${COL.high};color:#fff;border-color:${COL.high}">Ship anyway</button></div></div>`:''}
     </div></div></div>
     <div class="col" style="flex:1 1 260px">
-      <div class="grouph" style="margin-top:0">Repo preset in <span class="mono">.brisk.yaml</span> <span class="tag local">local</span></div>
+      <div class="grouph" style="margin-top:0">Repo preset in <span class="mono">.brisk.yaml</span></div>
       <div class="seg" id="plugpre">${['autonomous','reviewed','strict'].map(k=>`<button class="${k===plugPreset?'on':''}" data-k="${k}">${k}</button>`).join('')}</div>
       ${ex.project?`<label class="small" style="display:block;margin-top:8px"><input type="checkbox" id="plugpj" ${plugProject?'checked':''}> with shelf's project rules (<span class="mono">reviewed</span>)</label>`:''}
       <div class="kv" style="margin-top:8px"><div>tier</div><div>${tierTag(t)}</div><div>agent_review</div><div class="small">${rec?esc(a.agent_review.reason):'not recommended'}</div><div>plan</div><div class="small">${(a.agent_review?.plan||[]).map(r=>esc(r.area)).join(' · ')||'empty'}</div><div>plugin mode</div><div class="mono">${mode}</div></div>
@@ -3935,7 +3922,7 @@ function renderAR(){
   ${Object.keys(r.questions).sort().map(q=>`<div class="slab"><span><span class="mono">questions.${q}</span></span><b class="mono">${r.questions[q].toFixed(2)}</b></div><input type="range" min="0" max="1" step="0.01" value="${r.questions[q]}" data-arq="${q}">`).join('')}
   <div class="grouph">rules</div><div class="chips">${AR_RULE_CHOICES.map(id=>`<label class="small" style="white-space:nowrap;margin-right:8px"><input type="checkbox" data-arr="${id}" ${r.rules.includes(id)?'checked':''}> <span class="mono">${id}</span></label>`).join('')}</div>
   <p class="small">Try <span class="mono">min_tier: none</span> with <span class="mono">reviewed</span>: the handler still gets a review because <span class="mono">weakens_auth</span> is 0.97, and the DROP migration because <span class="mono">destroys_data</span> is 0.97. The reason is always brisk's own text, never text from the repo.</p>
-  <p class="small"><span class="tag local">local</span> Next to <span class="mono">recommended</span> and <span class="mono">reason</span>, <span class="mono">agent_review.plan</span> says what to check. It is built whether or not a review is recommended; see step 9 of the walkthrough.</p>`;
+  <p class="small">Next to <span class="mono">recommended</span> and <span class="mono">reason</span>, <span class="mono">agent_review.plan</span> says what to check. It is built whether or not a review is recommended; see step 9 of the walkthrough.</p>`;
   $('armt').onchange=e=>{ LV.ar.minTier=e.target.value; renderLevers(); };
   $('armu').oninput=e=>{ LV.ar.minUnc=+e.target.value; slid(e.target, LV.ar.minUnc===0?'0 (off)':LV.ar.minUnc.toFixed(1), 'lv-ar'); };
   $('lv-ar').querySelectorAll('[data-arq]').forEach(el=>el.oninput=()=>{ LV.ar.questions[el.dataset.arq]=+el.value; slid(el, (+el.value).toFixed(2), 'lv-ar'); });
@@ -3982,7 +3969,7 @@ function renderBiz(){
     <p class="small">Each hits as <span class="mono">config:&lt;id&gt;</span>: it shows up in reasons, can be re-tiered in <span class="mono">rule_tiers</span>, and can be listed in <span class="mono">agent_review.rules</span>. Tick <span class="mono">ui-components</span>: the React refactor becomes Medium in the table at the top.</p>
    </div>
    <div class="col" style="flex:2 1 520px">
-    <div class="grouph" style="margin-top:0"><span class="mono">content_rules</span> and <span class="mono">questions</span> <span class="tag local">local</span>: shelf's rule that documents stay private</div>
+    <div class="grouph" style="margin-top:0"><span class="mono">content_rules</span> and <span class="mono">questions</span> : shelf's rule that documents stay private</div>
     <div class="row"><div class="col" style="flex:1 1 100%"><pre class="out nowrap" style="font-size:11.5px;overflow:auto">${esc(D.project_rules.split('\n').filter(l=>!l.startsWith('#')).join('\n').trim())}</pre></div>
     <div class="col" style="flex:1 1 100%">
       <p class="small"><b><span class="mono">review_checks</span></b> give a project rule or question its own area in the review plan, in the team's words. Without one, it gets brisk's generic "Project rule" area: here the question <span class="mono">changes_document_access</span> has none, so the plan shows both. See step 9 with project rules.</p>
@@ -4008,7 +3995,7 @@ function renderPlugin(){
     'once-before-ship':['label + "Start agent review"','before Ship, one review must have run on this version of the changes; if none did, the Ship turn runs it first'],
     'before-ship':['label + "Start agent review"','every Ship and Push to Branch turn runs the review first and stops on a blocker it cannot fix'],
     'after-turn':['label','a reviewing subagent starts as soon as the turn ends, once per diff_hash','it uses only brisk\'s own plan areas; the team\'s .brisk.yaml areas wait for a review a person starts','a review turn never starts another']}[e.mode];
-  $('lv-plugin').innerHTML=`<h3 style="margin-top:0">In the Amp plugin <span class="tag local">local</span></h3>
+  $('lv-plugin').innerHTML=`<h3 style="margin-top:0">In the Amp plugin</h3>
   <p class="small muted" style="margin-top:0">brisk only recommends. The plugin decides what to do, from your user settings plus the repo's <span class="mono">provenance.preset</span>.</p>
   <table><tr><th>your <span class="mono">amp.brisk.preset</span></th><th>agent review</th><th>confirm Ship on High</th></tr>${Object.entries(CORE_PRESETS).map(([k,p])=>`<tr><td><label><input type="radio" name="upre" value="${k}" ${k===LV.userPreset?'checked':''}> <span class="mono">${k}</span></label></td><td class="mono">${p.plugin}</td><td>${k==='strict'?'on':'off'}</td></tr>`).join('')}</table>
   <p class="small">Your <span class="mono">amp.brisk.agentReview</span>: <select id="umode">${['default',...MODES].map(m=>`<option ${m===LV.userMode?'selected':''}>${m}</option>`).join('')}</select> · repo preset: <b class="mono">${LV.preset}</b> (from the top card)</p>
