@@ -346,6 +346,9 @@ func Apply(cs *risk.ChangeSet, findings []risk.Finding, session *risk.Session, c
 			add("generated_hand_edited", risk.Medium, "The agent edited a generated file by hand", "session", risk.Evidence{Path: fc.Path})
 		}
 	}
+	for _, p := range cs.Gitlinks {
+		add("nested_repo", risk.Medium, "Adds a submodule or nested git repository whose history the diff does not show", "rule", risk.Evidence{Path: p})
+	}
 	for _, p := range cs.IgnoredByChange {
 		add("gitignore_hides_code", risk.Medium, "A .gitignore line the change adds hides code files", "rule", risk.Evidence{Path: p})
 	}

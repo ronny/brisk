@@ -119,6 +119,10 @@ type ChangeSet struct {
 	// IgnoredByChange lists untracked code files that only a .gitignore
 	// line added by the change ignores. They are assessed as added files.
 	IgnoredByChange []string `json:"ignored_by_change,omitempty"`
+	// Gitlinks lists submodules or nested repositories the change adds.
+	// In the working tree, a nested repository's code files are assessed
+	// as added files.
+	Gitlinks []string `json:"gitlinks,omitempty"`
 }
 
 // ---------------------------------------------------------------------------

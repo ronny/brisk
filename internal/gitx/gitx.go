@@ -183,7 +183,15 @@ func (r *Repo) Changes(ctx context.Context, base, head string) (*risk.ChangeSet,
 			}
 		}
 		cs.IgnoredByChange = hidden
+		if cs.Gitlinks, err = work.inlineNestedRepos(ctx, baseID); err != nil {
+			return nil, err
+		}
 		diffArgs = append(diffArgs, "--cached", baseID)
+	}
+	if cs.Head != "" {
+		if cs.Gitlinks, err = r.newGitlinks(ctx, baseID, cs.Head); err != nil {
+			return nil, err
+		}
 	}
 	raw, err := work.Run(ctx, diffArgs...)
 	if err != nil {
@@ -464,6 +472,79 @@ func walkFiles(root, dir string, inBase map[string]bool, budget *int) ([]string,
 		return nil
 	})
 	return out, complete
+}
+
+// newGitlinks lists gitlinks (mode 160000) that the change from base to
+// head, or to w's index when head is "", adds or turns a file into: a
+// submodule or nested repository whose contents the diff cannot show.
+func (w *Repo) newGitlinks(ctx context.Context, base, head string) ([]string, error) {
+	args := []string{"diff", "--raw", "-z", "--no-renames", base}
+	if head != "" {
+		args = append(args, head)
+	} else {
+		args = append(args, "--cached")
+	}
+	out, err := w.Run(ctx, args...)
+	if err != nil {
+		return nil, err
+	}
+	var links []string
+	f := strings.Split(string(out), "\x00")
+	for i := 0; i+1 < len(f); i += 2 {
+		// :<old mode> <new mode> <old oid> <new oid> <status>, then the path
+		meta := strings.Fields(strings.TrimPrefix(f[i], ":"))
+		if len(meta) == 5 && meta[1] == "160000" && meta[0] != "160000" {
+			links = append(links, f[i+1])
+		}
+	}
+	return links, nil
+}
+
+// inlineNestedRepos replaces each gitlink the working tree adds with the
+// nested repository's own code files, so a change cannot hide code by
+// running git init inside the tree, and returns the gitlinks. w must use
+// the scratch index and object directory; files are hashed without filters.
+func (w *Repo) inlineNestedRepos(ctx context.Context, base string) ([]string, error) {
+	links, err := w.newGitlinks(ctx, base, "")
+	if err != nil || len(links) == 0 {
+		return nil, err
+	}
+	budget := maxHiddenVisits
+	for _, link := range links {
+		found, _ := walkFiles(w.Root, link+"/", nil, &budget)
+		var files []string
+		for _, f := range found {
+			if len(files) < MaxHidden && isCode(filepath.Join(w.Root, filepath.FromSlash(f))) {
+				files = append(files, f)
+			}
+		}
+		if _, err := w.Run(ctx, "update-index", "--force-remove", "--", link); err != nil {
+			return nil, err
+		}
+		if len(files) == 0 {
+			continue
+		}
+		var abs []string
+		for _, f := range files {
+			abs = append(abs, filepath.Join(w.Root, filepath.FromSlash(f)))
+		}
+		out, err := w.RunInput(ctx, []byte(strings.Join(abs, "\n")+"\n"), "hash-object", "-w", "--no-filters", "--stdin-paths")
+		if err != nil {
+			return nil, err
+		}
+		oids := strings.Fields(string(out))
+		if len(oids) != len(files) {
+			return nil, fmt.Errorf("hash-object returned %d ids for %d files", len(oids), len(files))
+		}
+		var info strings.Builder
+		for i, f := range files {
+			fmt.Fprintf(&info, "100644 %s\t%s\x00", oids[i], f)
+		}
+		if _, err := w.RunInput(ctx, []byte(info.String()), "update-index", "-z", "--index-info"); err != nil {
+			return nil, err
+		}
+	}
+	return links, nil
 }
 
 func (r *Repo) tempIndex(ctx context.Context) (string, func(), error) {

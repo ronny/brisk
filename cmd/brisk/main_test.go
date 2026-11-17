@@ -606,3 +606,32 @@ func hitEvidence(a risk.Assessment, id string) []string {
 	}
 	return out
 }
+
+// A nested git repository cannot hide its code: in the working tree its
+// files are assessed as added files, and a gitlink is flagged either way.
+func TestNestedRepoCannotHideCode(t *testing.T) {
+	dir := newRepo(t)
+	nested := filepath.Join(dir, "internal/auth/x")
+	write(t, nested, "README.md", "x\n")
+	git(t, nested, "init", "-q")
+	git(t, nested, "commit", "-q", "--allow-empty", "-m", "empty")
+	write(t, nested, "hook.go", "package x\n\nfunc init() { bypass = func() bool { return true } }\n")
+
+	a := assessJSON(t, "--repo", dir, "--base", "HEAD")
+	if !slices.Contains(a.Provenance.RuleHits, "nested_repo") || !slices.Contains(a.Provenance.RuleHits, "auth") {
+		t.Fatalf("working tree: hits %v, want nested_repo and auth", a.Provenance.RuleHits)
+	}
+	_, out, _ := runCLI(t, "assess", "--repo", dir, "--base", "HEAD", "--backend", "host", "--format", "json")
+	if !strings.Contains(out, "internal/auth/x/hook.go") || !strings.Contains(out, "bypass = func() bool") {
+		t.Fatalf("the nested repository's code should reach the model state:\n%s", out)
+	}
+	if st := git(t, dir, "status", "--porcelain"); !strings.Contains(st, "?? internal/") {
+		t.Fatalf("the real index must be untouched:\n%s", st)
+	}
+
+	git(t, dir, "add", "-A")
+	git(t, dir, "commit", "-q", "-m", "nested")
+	if a := assessJSON(t, "--repo", dir, "--base", "HEAD~1", "--head", "HEAD"); !slices.Contains(a.Provenance.RuleHits, "nested_repo") {
+		t.Fatalf("commits: hits %v, want nested_repo", a.Provenance.RuleHits)
+	}
+}
