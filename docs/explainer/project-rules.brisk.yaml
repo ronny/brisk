@@ -1,0 +1,16 @@
+# shelf's own business rules, used by example.sh for the "project rules" results.
+# Documents are private to their owner until shared (SEC-3).
+preset: reviewed
+content_rules:
+  - id: document_access
+    paths: ["backend/**/*.go", "frontend/src/**/*.tsx"]
+    pattern: 'Visibility|OwnerID|IsAdmin|isAdmin|canEdit'
+    lines: both
+    floor: high
+    reason: Changes who may see or edit a document (SEC-3).
+questions:
+  - id: changes_document_access
+    text: Does this change who can see, edit, or delete a document?
+    raise_to: high
+    min: 0.8
+    reason: Changes who can see or edit a document (SEC-3).
