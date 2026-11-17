@@ -105,8 +105,8 @@ def runtime():
         "Tree-sitter WASM on wazero",
         "Reports structural changes"])
     d.box(435, 555, 330, 120, "Project context + policy", [
-        "Git history and sensitive paths",
-        "Config from the base commit",
+        "Git history; path + content rules",
+        "Base config: policy + project questions",
         "Presets: autonomous / reviewed / strict"])
     d.box(830, 555, 330, 120, "Classifier backends", [
         "Jev through OpenRouter",

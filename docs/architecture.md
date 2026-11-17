@@ -10,15 +10,14 @@ The overview shows the main components. Implementation details and the separate 
 
 ## Scope and status
 
-This snapshot includes the completed policy and review implementation on the [core thread's local `main`](https://ampcode.com/threads/T-01a1e74a-81c7-76ef-8fa3-ac7baacb2a0f) at `57f0b57`.
-That implementation was not yet pushed when this snapshot was prepared. The overview shows the implemented MVP shape.
+This snapshot includes policy presets, agent review, and project rules (`content_rules` and project `questions`) from the [core thread](https://ampcode.com/threads/T-01a1e74a-81c7-76ef-8fa3-ac7baacb2a0f). The overview shows the implemented MVP shape.
 Additional implementations are interface-only. The input box identifies untrusted evidence.
 
 | Part | MVP implementation | Extension boundary |
 | --- | --- | --- |
 | Core and CLI | Go library, static binary, JSON schemas | [`risk/`](../risk/risk.go) contracts and [`assess/`](../assess/assess.go) engine |
 | Classifier | Jev through OpenRouter, host answers, rules-only | `risk.Backend` answers typed questions. Other classifiers are interface-only. |
-| Context | Base-commit `.brisk.yaml`, git history, CODEOWNERS | `risk.ContextProvider` supplies path rules, owners, and history. Other providers are interface-only. |
+| Context | Base-commit `.brisk.yaml`, git history, CODEOWNERS | `risk.ContextProvider` supplies path and content rules, owners, and history. Other providers are interface-only. |
 | Language | Go, TypeScript, TSX, JavaScript | `risk.LanguageBackend` reports structural facts. Additional languages and LSP are interface-only. |
 | Harness | Amp directory plugin | Harness-neutral session JSON, CLI invocation, host request/answer JSON. Claude Code, Codex, and Pi adapters are interface-only. |
 
@@ -66,12 +65,18 @@ Base-commit `.brisk.yaml` controls policy. Its optional keys are:
 
 - `preset`: `autonomous`, `reviewed` (default), or `strict`.
 - `sensitive_paths`: project-specific path rules and their minimum tiers.
+- `content_rules`: project-specific regular expressions on changed, non-comment lines in matching paths, with minimum tiers.
+- `questions`: up to 10 project yes/no questions that the model answers with brisk's own questions.
 - `high_share`, `medium_share`: target model-only shares at High and Medium-or-above, using calibration risk quantiles.
 - `thresholds`: explicit model-risk thresholds. These take precedence over shares.
 - `overrides`: answer thresholds that raise the model tier. These replace the calibration overrides.
 - `rule_tiers`: rule-specific tiers, applied before the engine computes the rule floor.
 - `actions`: action text for each tier.
 - `agent_review`: independent review conditions, with `min_tier`, `min_uncertainty`, `questions`, and `rules`.
+
+Path and content rules hit as `config:<id>` and set the floor like built-in rules. A content rule matches one line at a time, so it is a tripwire, not a guarantee.
+Project questions have no calibration weight. Each one acts only through its `raise_to` override, so it can raise the model tier but never lower it. Without `raise_to`, the answer appears only in `provenance.answers`.
+A fired project question shows its configured `reason`. The `agent_review.reason` stays brisk's fixed text.
 
 Calibration remains specific to the answering model version. Rule floors and overrides can exceed the requested model-only shares.
 Review conditions are ORed. They use existing answers and rule hits, without another model call.
