@@ -49,7 +49,7 @@ export interface Assessment {
 	reasons: Reason[]
 	stats: { files: number; additions: number; deletions: number }
 	/** Whether a further agent review is recommended, separate from the tier. Older binaries omit it. */
-	agent_review?: { recommended: boolean; reason: string; plan?: ReviewArea[] }
+	agent_review?: { recommended: boolean; reason: string; plan?: ReviewArea[]; context_files?: string[] }
 	provenance: {
 		brisk_version: string
 		backend: 'openrouter' | 'host' | 'rules-only'
