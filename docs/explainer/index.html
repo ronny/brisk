@@ -148,7 +148,7 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
 <body>
 <header>
   <h1>How brisk works</h1>
-  <p class="lede">brisk rates a code change <span class="tier low">Low</span> <span class="tier medium">Medium</span> <span class="tier high">High</span> with up to three reasons. Rules set a floor. A decision model, TypeSafe's Jev, can only raise the tier above that floor. The example is <b>shelf</b>, a repo with a Go backend and a React/TypeScript frontend. Every example assessment on this page is real output from brisk (the core thread's local <span class="mono">main</span>, 13f177b) and Jev (<span class="mono">jev-1.14.0</span>, through Amp).</p>
+  <p class="lede">brisk rates a code change <span class="tier low">Low</span> <span class="tier medium">Medium</span> <span class="tier high">High</span> with up to three reasons. Rules set a floor. A decision model, TypeSafe's Jev, can only raise the tier above that floor. The example is <b>shelf</b>, a repo with a Go backend and a React/TypeScript frontend. Every example assessment on this page is real output from brisk (the core thread's local <span class="mono">main</span>, 5cf07c3) and Jev (<span class="mono">jev-1.14.0</span>, through Amp).</p>
   <div class="legend">
     <span><span class="sw"></span>on <span class="mono">main</span> (fbdc84c)</span>
     <span><span class="sw local"></span>done locally, not pushed yet</span>
@@ -215,7 +215,7 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
 <!-- ============================================================ LEVERS -->
 <section id="levers">
   <h2>3 · Levers</h2>
-  <p class="lede">A team sets its policy in <span class="mono">.brisk.yaml</span>, read from the <b>base</b> commit. Pick a preset, then turn any lever. The six example changes are re-scored live with their real Jev answers. <span class="tag local">local</span> presets and levers are built on the core thread's local <span class="mono">main</span> (13f177b), not pushed.</p>
+  <p class="lede">A team sets its policy in <span class="mono">.brisk.yaml</span>, read from the <b>base</b> commit. Pick a preset, then turn any lever. The six example changes are re-scored live with their real Jev answers. <span class="tag local">local</span> presets and levers are built on the core thread's local <span class="mono">main</span> (5cf07c3), not pushed.</p>
   <div class="card local-box" id="lv-preset"></div>
   <div class="grid2">
     <div class="card" id="lv-share"></div>
@@ -233,7 +233,7 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
 </section>
 
 <footer>
-  Sources: brisk <span class="mono">main</span> at fbdc84c; unpushed work in the core thread (local <span class="mono">main</span>, 13f177b: security fixes, presets and levers, agent review and its review plan, project rules) and the language and plugin thread; the MVP plan, investigation, and evaluation (revision 5) artifacts, as of 17 Nov 2026. The example data comes from <span class="mono">docs/explainer/example.sh</span>: it builds the shelf repo, runs brisk on each change, gets Jev's answers, scores them under each preset, and embeds the results here with <span class="mono">embed.py</span>. The page checks that its own tier and agent-review logic gives the same results as brisk for every example and preset.
+  Sources: brisk <span class="mono">main</span> at fbdc84c; unpushed work in the core thread (local <span class="mono">main</span>, 5cf07c3: security fixes, presets and levers, agent review and its review plan, project rules) and the language and plugin thread; the MVP plan, investigation, and evaluation (revision 5) artifacts, as of 17 Nov 2026. The example data comes from <span class="mono">docs/explainer/example.sh</span>: it builds the shelf repo, runs brisk on each change, gets Jev's answers, scores them under each preset, and embeds the results here with <span class="mono">embed.py</span>. The page checks that its own tier and agent-review logic gives the same results as brisk for every example and preset.
 </footer>
 
 <script id="examples-data" type="application/json">
@@ -3157,7 +3157,7 @@ const FLOWS = {
     {id:'ctx',c:3,r:0,icon:'📁',title:'Project context',sub:['.brisk.yaml from the base commit','CODEOWNERS and 90-day history'],badge:true,
       d:'<span class="mono">.brisk.yaml</span> is read from the <b>base</b> commit, so a change cannot loosen the rules that judge it. History gives commits, authors, earlier fixes, and reverts per file. <span class="tag local">local</span> the file now also holds the team\'s policy: a preset plus levers such as <span class="mono">high_share</span>, <span class="mono">overrides</span>, <span class="mono">rule_tiers</span>, and <span class="mono">agent_review</span>. See Levers.'},
     {id:'rules',c:4,r:0,icon:'📏',title:'Rules → floor',sub:['path, line, finding, session rules','floor = highest rule hit'],step:2,
-      d:'Deterministic rules on paths, added lines, structural findings, and the session record. Each hit has a tier; the floor is the highest. Untrusted text such as comments cannot lower it.'},
+      d:'Deterministic rules on paths, added lines, structural findings, and the session record. Each hit has a tier; the floor is the highest. Untrusted text such as comments cannot lower it.<br><br>The floor never skips Jev. Rules run first, and their hits become per-file tags in the state Jev reads. The floor then waits at <span class="mono">max(floor, model)</span> while brisk asks Jev, even when the floor is already High. Jev\'s answers still add reasons, decide <span class="mono">agent_review</span>, and score the review plan.'},
     {id:'state',c:4,r:1,icon:'📨',title:'State + questions',sub:['task, summary, tags, findings, verification, clipped diff'],step:5,badge:true,
       d:'The state is what Jev reads. It is built for a fixed character budget. <span class="tag local">local</span> detected secrets are redacted everywhere before the request, and key and credential files are left out entirely.'},
     {id:'jev',c:3,r:1,icon:'⚖',title:'Jev answers',sub:['OpenRouter systemone API','+ a 2nd call scoring review areas'],step:5,badge:true,
@@ -3165,16 +3165,16 @@ const FLOWS = {
     {id:'cal',c:2,r:1,icon:'∑',title:'Calibrate',sub:['features × weights → model risk','thresholds, then overrides'],step:6,badge:true,
       d:'<span class="mono">calibration/jev-1.14.json</span> turns the answers plus diff size into a 0–1 model risk, compares it with the thresholds, then applies overrides that can only raise the model tier. <span class="tag local">local</span> the preset or <span class="mono">high_share</span> can move the thresholds, using risk quantiles stored in the calibration.'},
     {id:'max',c:1,r:1,icon:'⤒',title:'max(floor, model)',sub:['the model can only raise the tier'],step:7,fill:'#fff8e8',stroke:'#c98200',
-      d:'The rule floor reaches this box directly. Whatever Jev says, the tier never goes below the floor.'},
+      d:'The red line carries the floor here directly; it is the same run, not a parallel path. brisk always asks Jev (unless the change has no files), then takes the higher of the floor and the model tier. Whatever Jev says, the tier never goes below the floor. If Jev fails, the tier is the floor.'},
     {id:'out',c:0,r:1,icon:'⇥',title:'Output',sub:['tier, ≤3 reasons, action','agent_review + review plan'],step:9,badge:true,
       d:'Exit codes: 0 assessed, 1 error, 2 usage error, 3 tier at or above <span class="mono">--fail-on</span>. In CI, <span class="mono">brisk assess --fail-on high</span> fails the job on High. <span class="tag local">local</span> next to the tier, <span class="mono">agent_review {recommended, reason}</span> says whether to run an agent review, and the action text comes from the preset. <span class="mono">agent_review.plan</span> lists the areas a reviewer should check, with evidence and checks; see step 9.'},
     {id:'fb',c:3,r:1.78,h:84,title:'Jev fails?',sub:['→ rules only;','provenance.degraded says why'],fill:'#f6f5f2',
       d:'Any backend error falls back to the rules-only assessment. The tier is then the floor, and <span class="mono">provenance.degraded</span> records the reason.'},
   ], edges:[
     {from:'chg',to:'git'},{from:'git',to:'lang'},{from:'lang',to:'ctx'},{from:'ctx',to:'rules'},
-    {from:'rules',to:'state',dx:30,label:''},{from:'state',to:'jev',label:'request'},{from:'jev',to:'cal',label:'answers'},
+    {from:'rules',to:'state',dx:30,label:'hits as tags'},{from:'state',to:'jev',label:'request'},{from:'jev',to:'cal',label:'answers'},
     {from:'cal',to:'max',label:'model tier'},{from:'max',to:'out'},
-    {from:'rules',to:'max',dx:-40,red:true,label:'floor'},
+    {from:'rules',to:'max',dx:-40,red:true,label:'floor (waits; Jev still asked)'},
     {from:'jev',to:'fb',dash:true},
   ]},
   amp:{label:'Amp plugin', tab:'Amp plugin', nodes:[
@@ -3742,7 +3742,7 @@ function renderMetrics(){
 $('metrictabs').addEventListener('click',e=>{ const b=e.target.closest('button'); if(!b) return; metricKey=b.dataset.k; renderMetrics(); });
 
 // ---------------------------------------------------------------- section 3: levers
-// Mirrors assess/policy.go on the core thread's local main (13f177b).
+// Mirrors assess/policy.go on the core thread's local main (5cf07c3).
 const DANGER = ['secret_added','tls_disabled','gitignore_hides_code','nested_repo','generated_without_source','generated_hand_edited'];
 const RULE_REVIEW_TEXT = {
   secret_added:'The change adds what looks like a secret.', tls_disabled:'The change turns off TLS certificate checks.',
