@@ -64,7 +64,7 @@ func (e *Engine) Prepare(ctx context.Context, in Input) (*Prepared, error) {
 		return nil, err
 	}
 	for i := range cs.Files {
-		cs.Files[i].HandEdited = rules.HandEditedGenerated(cs.Files[i], in.Session)
+		cs.Files[i].HandEdited = rules.HandEditedGenerated(cs.Files[i], in.Session, cs.RepoRoot)
 	}
 	p.Changes = cs
 	lap("git", t)

@@ -503,7 +503,17 @@ func TestIgnoreRulesCannotHideCode(t *testing.T) {
 			write(t, dir, "internal/auth/zz.go", bypass)
 			write(t, dir, ".gitignore", "*.go\n# note\n")
 		}, false},
+		{"build-output name inside a package", "", func(t *testing.T, dir string) {
+			write(t, dir, "internal/auth/tmp/hook.go", bypass)
+			write(t, dir, ".gitignore", "tmp/\n")
+		}, true},
+		{"repo-local core.excludesFile", "", func(t *testing.T, dir string) {
+			write(t, dir, ".git/myignore", "*.local.go\n")
+			git(t, dir, "config", "core.excludesFile", ".git/myignore")
+			write(t, dir, "internal/auth/dev.local.go", bypass)
+		}, false},
 		{"build output and a virtualenv", "", func(t *testing.T, dir string) {
+			write(t, dir, "web/package.json", "{}\n")
 			write(t, dir, "web/dist/app.min.js", "var a=1\n")
 			write(t, dir, "web/dist/chunk.js", "export const b = 2\n")
 			write(t, dir, "env/lib/site.py", "import os\n")
@@ -547,9 +557,14 @@ func TestHandEditedGeneratedFileIsAnalysed(t *testing.T) {
 	if a := assessJSON(t, "--repo", dir, "--base", "HEAD"); slices.Contains(a.Provenance.RuleHits, "lang:auth_logic_changed") || slices.Contains(a.Provenance.RuleHits, "generated_hand_edited") {
 		t.Fatalf("without a session the generated edits are skipped, got hits %v", a.Provenance.RuleHits)
 	}
+	// Paths as harnesses write them: absolute, with ./, or relative to a
+	// subdirectory of the repository.
 	session := filepath.Join(t.TempDir(), "session.json")
-	write(t, filepath.Dir(session), "session.json", `{"files_touched": ["internal/auth/check.go", "internal/auth/api.pb.go"]}`)
+	write(t, filepath.Dir(session), "session.json", `{"files_touched": ["`+filepath.Join(dir, "internal/auth/check.go")+`", "./auth/api.pb.go"]}`)
 	a := assessJSON(t, "--repo", dir, "--base", "HEAD", "--session", session)
+	if ev := hitEvidence(a, "generated_hand_edited"); len(ev) != 2 {
+		t.Fatalf("generated_hand_edited on %v, want both files", ev)
+	}
 	hits := a.Provenance.RuleHits
 	if a.Floor != risk.High || !slices.Contains(hits, "generated_hand_edited") || !slices.Contains(hits, "lang:auth_logic_changed") || !slices.Contains(hits, "auth") {
 		t.Fatalf("floor %s hits %v, want high with generated_hand_edited, auth and lang:auth_logic_changed", a.Floor, hits)
@@ -561,4 +576,17 @@ func TestHandEditedGeneratedFileIsAnalysed(t *testing.T) {
 			}
 		}
 	}
+}
+
+// hitEvidence returns the paths a reason with id points at.
+func hitEvidence(a risk.Assessment, id string) []string {
+	var out []string
+	for _, r := range a.Reasons {
+		if r.ID == id {
+			for _, e := range r.Evidence {
+				out = append(out, e.Path)
+			}
+		}
+	}
+	return out
 }

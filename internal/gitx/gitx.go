@@ -224,7 +224,7 @@ func (w *Repo) hiddenByChange(ctx context.Context, base string) (hidden, code []
 	}
 	var entries []string
 	for _, e := range strings.Split(strings.TrimSuffix(string(out), "\x00"), "\x00") {
-		if !expectedIgnored(e) {
+		if !expectedIgnored(w.Root, e) {
 			entries = append(entries, e)
 		}
 	}
@@ -290,23 +290,58 @@ func (w *Repo) baseIgnoreRules(ctx context.Context, base string) (*Repo, func(),
 	if _, err := rules.run(ctx, nil, "init", "-q"); err != nil {
 		return fail(err)
 	}
-	list, err := w.Run(ctx, "ls-tree", "-r", "-z", "--name-only", base)
+	list, err := w.Run(ctx, "ls-tree", "-r", "-z", base)
 	if err != nil {
 		return fail(err)
 	}
-	for _, p := range strings.Split(strings.TrimSuffix(string(list), "\x00"), "\x00") {
-		if path.Base(p) != ".gitignore" {
-			continue
+	var paths, oids []string
+	for _, e := range strings.Split(strings.TrimSuffix(string(list), "\x00"), "\x00") {
+		// <mode> SP <type> SP <oid> TAB <path>
+		meta, p, ok := strings.Cut(e, "\t")
+		if f := strings.Fields(meta); ok && len(f) == 3 && f[1] == "blob" && path.Base(p) == ".gitignore" {
+			paths, oids = append(paths, p), append(oids, f[2])
 		}
-		b, err := w.Run(ctx, "show", base+":"+p)
+	}
+	if len(oids) > 0 {
+		out, err := w.RunInput(ctx, []byte(strings.Join(oids, "\n")+"\n"), "cat-file", "--batch")
 		if err != nil {
 			return fail(err)
 		}
-		dst := filepath.Join(tmp, filepath.FromSlash(p))
-		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-			return fail(err)
+		rd := bufio.NewReader(bytes.NewReader(out))
+		for _, p := range paths {
+			header, err := rd.ReadString('\n')
+			if err != nil {
+				return fail(err)
+			}
+			f := strings.Fields(header)
+			if len(f) != 3 {
+				return fail(fmt.Errorf("cat-file: unexpected header %q", header))
+			}
+			n, err := strconv.Atoi(f[2])
+			if err != nil {
+				return fail(err)
+			}
+			b := make([]byte, n+1) // content and its trailing newline
+			if _, err := io.ReadFull(rd, b); err != nil {
+				return fail(err)
+			}
+			dst := filepath.Join(tmp, filepath.FromSlash(p))
+			if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+				return fail(err)
+			}
+			if err := os.WriteFile(dst, b[:n], 0o644); err != nil {
+				return fail(err)
+			}
 		}
-		if err := os.WriteFile(dst, b, 0o644); err != nil {
+	}
+	// The scratch repository sits outside the real one, so the real one's
+	// own or includeIf core.excludesFile would not apply to it.
+	if out, err := w.Run(ctx, "config", "--path", "core.excludesFile"); err == nil {
+		x := strings.TrimSpace(string(out))
+		if !filepath.IsAbs(x) {
+			x = filepath.Join(w.Root, x)
+		}
+		if _, err := rules.run(ctx, nil, "config", "core.excludesFile", x); err != nil {
 			return fail(err)
 		}
 	}
@@ -340,19 +375,37 @@ func checkIgnore(ctx context.Context, r *Repo, paths []string) (map[string]bool,
 	return set, nil
 }
 
-// expectedIgnored reports whether p is a directory of dependencies or build
-// output, which projects routinely ignore.
-func expectedIgnored(p string) bool {
+// expectedIgnored reports whether p, relative to root, is a directory of
+// dependencies or build output, which projects routinely ignore. Caches
+// and node_modules count anywhere. Build-output and virtualenv names count
+// only at the repository root or beside a project manifest, so a package
+// that happens to be called tmp or out is still checked. vendor/ counts
+// only beside composer.json: Go compiles vendored code.
+func expectedIgnored(root, p string) bool {
 	if !strings.HasSuffix(p, "/") {
 		return false
 	}
+	parent := path.Dir(strings.TrimSuffix(p, "/"))
+	beside := func(names ...string) bool {
+		for _, n := range names {
+			if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(parent), n)); err == nil {
+				return true
+			}
+		}
+		return false
+	}
 	switch path.Base(p) {
-	case "node_modules", "vendor", "dist", "build", "out", "target", "coverage", ".next", ".nuxt", ".turbo", ".cache",
-		"env", "venv", ".venv", "__pycache__", ".pytest_cache", ".mypy_cache", "tmp", ".tmp":
+	case "node_modules", "__pycache__", ".pytest_cache", ".mypy_cache":
 		return true
+	case "vendor":
+		return beside("composer.json")
+	case "dist", "build", "out", "target", "coverage", ".next", ".nuxt", ".turbo", ".cache", "env", "venv", ".venv", "tmp", ".tmp":
+		return parent == "." || beside(manifests...)
 	}
 	return false
 }
+
+var manifests = []string{"package.json", "go.mod", "Cargo.toml", "pyproject.toml", "setup.py", "pom.xml", "build.gradle", "build.gradle.kts", "composer.json", "Gemfile", "mix.exs"}
 
 var codeExt = map[string]bool{".go": true, ".ts": true, ".tsx": true, ".mts": true, ".cts": true, ".js": true, ".jsx": true, ".mjs": true, ".cjs": true,
 	".vue": true, ".svelte": true, ".py": true, ".rb": true, ".java": true, ".kt": true, ".scala": true, ".rs": true, ".php": true, ".cs": true,
@@ -394,7 +447,7 @@ func walkFiles(root, dir string, budget *int) ([]string, bool) {
 		}
 		rel = filepath.ToSlash(rel)
 		if d.IsDir() {
-			if d.Name() == ".git" || rel+"/" != dir && expectedIgnored(rel+"/") {
+			if d.Name() == ".git" || rel+"/" != dir && expectedIgnored(root, rel+"/") {
 				return filepath.SkipDir
 			}
 			return nil

@@ -7,8 +7,8 @@ package rules
 import (
 	"fmt"
 	"path"
+	"path/filepath"
 	"regexp"
-	"slices"
 	"sort"
 	"strings"
 
@@ -175,9 +175,10 @@ func HasGeneratedMarker(src []byte) bool {
 // HandEditedGenerated reports whether the session shows the agent edited
 // fc with its own tools although the file was generated before the change,
 // by name, lockfile, or marker. A generator run through the shell does not
-// show up in files_touched.
-func HandEditedGenerated(fc risk.FileChange, s *risk.Session) bool {
-	if s == nil || fc.Status == risk.Added || !slices.Contains(s.FilesTouched, fc.Path) {
+// show up in files_touched. Snapshots are meant to be edited by hand, and
+// deleting a file needs no analysis of its contents.
+func HandEditedGenerated(fc risk.FileChange, s *risk.Session, root string) bool {
+	if s == nil || fc.Status == risk.Added || fc.Status == risk.Deleted || strings.HasSuffix(fc.Path, ".snap") || !touched(s, fc.Path, root) {
 		return false
 	}
 	old := fc.Path
@@ -185,6 +186,26 @@ func HandEditedGenerated(fc risk.FileChange, s *risk.Session) bool {
 		old = fc.OldPath
 	}
 	return generatedName(old) || isLockfile(old) || HasGeneratedMarker(fc.Old)
+}
+
+// touched reports whether the session's files_touched names p, a path
+// relative to the repository root. Entries may be absolute, start with
+// "./", or be relative to a subdirectory the harness runs in.
+func touched(s *risk.Session, p, root string) bool {
+	for _, f := range s.FilesTouched {
+		if filepath.IsAbs(f) {
+			rel, err := filepath.Rel(root, f)
+			if err != nil {
+				continue
+			}
+			f = rel
+		}
+		f = path.Clean(filepath.ToSlash(f))
+		if f == p || strings.HasSuffix(p, "/"+f) {
+			return true
+		}
+	}
+	return false
 }
 
 func codeOnly(fc risk.FileChange) bool {
