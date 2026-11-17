@@ -1,7 +1,7 @@
 // Builds brisk's harness-neutral session record (schema/session.schema.json)
 // from Amp thread messages. Pure functions, so they test without Amp.
 
-import type { PluginAPI, ThreadMessage } from '@ampcode/plugin'
+import type { PluginAPI, PluginThread, ThreadMessage } from '@ampcode/plugin'
 
 export interface Command {
 	command: string
@@ -181,4 +181,40 @@ export function buildSession(threadID: string, turns: Turn[], title?: string | n
 	if (commands.length) s.commands = commands.slice(-MAX_COMMANDS)
 	if (kept.length) s.excerpts = kept
 	return s
+}
+
+const MAX_PAGES = 10 // 20 messages each, overlapping by one
+
+/**
+ * readTranscript reads the transcript, oldest first: all of it when it is
+ * short, else its first page (for the intent) and about the newest 190
+ * messages. It prefers the full transcript; some threads return nothing with
+ * `full: true`, so it then reads what the next turn would see.
+ *
+ * Each call is a round trip (~400 ms), so after the newest page it fetches
+ * the remaining pages at once. They overlap by one message, so a message
+ * appended during the read cannot fall between two pages.
+ */
+export async function readTranscript(thread: Pick<PluginThread, 'messages'>): Promise<ThreadMessage[]> {
+	for (const full of [true, false]) {
+		const newest = await thread.messages({ full, from: 'end', limit: 20 })
+		if (newest.length === 0) continue
+		if (newest.length < 20) return newest
+		const [first, ...older] = await Promise.all([
+			thread.messages({ full, from: 'start', limit: 20 }),
+			...Array.from({ length: MAX_PAGES - 1 }, (_, i) =>
+				thread.messages({ full, from: 'end', offset: (i + 1) * 19, limit: 20 }),
+			),
+		])
+		// older is newest first; put everything oldest first and drop repeats.
+		const seen = new Set<ThreadMessage['id']>()
+		const out: ThreadMessage[] = []
+		for (const m of [...first, ...older.reverse().flat(), ...newest]) {
+			if (seen.has(m.id)) continue
+			seen.add(m.id)
+			out.push(m)
+		}
+		return out
+	}
+	return []
 }

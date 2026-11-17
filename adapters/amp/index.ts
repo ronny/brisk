@@ -2,10 +2,10 @@
 // binary and shows it as a thread label, a quick action, and a line in the
 // Ship prompt. Advisory unless a project turns on brisk.confirmShipOnHigh.
 
-import type { PluginAPI, PluginThread, QuickAction, ThreadMessage } from '@ampcode/plugin'
+import type { PluginAPI, PluginThread, QuickAction } from '@ampcode/plugin'
 import { assess, type Decide, type Mode, type RunResult } from './src/brisk.ts'
 import { labelsFor, reviewMessage, shipLine, summary } from './src/present.ts'
-import { buildSession, turnsFromMessages } from './src/session.ts'
+import { buildSession, readTranscript, turnsFromMessages } from './src/session.ts'
 
 export const description =
 	"Rates how risky the thread's code changes are (Low, Medium, High) with brisk. Labels the thread, adds a review quick action, and notes Medium and High risk in the Ship prompt."
@@ -60,39 +60,6 @@ interface ThreadState {
 	pending?: Promise<RunResult | undefined>
 }
 
-const MAX_PAGES = 10 // 20 messages each
-
-/**
- * threadMessages reads the newest MAX_PAGES pages of the transcript plus its
- * first page (for the intent), oldest first. It prefers the full transcript;
- * some threads return nothing with `full: true`, so it then reads what the
- * next turn would see.
- */
-async function threadMessages(thread: PluginThread): Promise<ThreadMessage[]> {
-	for (const full of [true, false]) {
-		const pages: ThreadMessage[][] = []
-		let count = 0
-		let complete = false
-		for (let page = 0; page < MAX_PAGES; page++) {
-			const batch = await thread.messages({ full, from: 'end', offset: count, limit: 20 })
-			pages.unshift(batch)
-			count += batch.length
-			if (batch.length < 20) {
-				complete = true
-				break
-			}
-		}
-		let out = pages.flat()
-		if (!complete) {
-			const seen = new Set(out.map((m) => m.id))
-			const first = await thread.messages({ full, from: 'start', limit: 20 })
-			out = [...first.filter((m) => !seen.has(m.id)), ...out]
-		}
-		if (out.length) return out
-	}
-	return []
-}
-
 export default function (amp: PluginAPI) {
 	const threads = new Map<string, ThreadState>()
 	const state = (id: string) => {
@@ -118,7 +85,7 @@ export default function (amp: PluginAPI) {
 			s.running = p
 			try {
 				const cfg = await settings(amp)
-				const messages = await threadMessages(thread)
+				const messages = await readTranscript(thread)
 				const session = buildSession(
 					thread.id,
 					turnsFromMessages(messages, amp.helpers, root),

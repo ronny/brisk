@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import type { ThreadMessage } from '@ampcode/plugin'
 import { assess, type Assessment } from '../src/brisk.ts'
 import { labelsFor, shipLine, summary } from '../src/present.ts'
-import { buildSession, exitCode, turnsFromMessages, type Helpers } from '../src/session.ts'
+import { buildSession, exitCode, readTranscript, turnsFromMessages, type Helpers } from '../src/session.ts'
 
 const floor: Assessment = {
 	schema: 'brisk.assessment/v1',
@@ -157,6 +157,48 @@ describe('session', () => {
 				{ role: 'assistant', text: 'Done, tests pass.' },
 			],
 		})
+	})
+
+	// A thread whose messages() pages like Amp's: clamped to 20, from either end.
+	const fakeThread = (n: number, fullEmpty = false) => {
+		const all: ThreadMessage[] = Array.from({ length: n }, (_, i) => ({ role: 'user', id: i, content: [{ type: 'text', text: `m${i}` }] }))
+		return {
+			messages: async (o: { full?: boolean; from?: 'start' | 'end'; offset?: number; limit?: number } = {}) => {
+				if (o.full && fullEmpty) return []
+				const limit = Math.min(o.limit ?? 10, 20)
+				const offset = o.offset ?? 0
+				if (o.from === 'start') return all.slice(offset, offset + limit)
+				const end = n - offset
+				return end <= 0 ? [] : all.slice(Math.max(0, end - limit), end)
+			},
+		}
+	}
+	const ids = (ms: ThreadMessage[]) => ms.map((m) => m.id as number)
+
+	const range = (from: number, to: number) => Array.from({ length: to - from }, (_, i) => from + i)
+
+	test('readTranscript returns threads up to 211 messages whole and in order', async () => {
+		for (const n of [1, 19, 20, 21, 30, 200, 210, 211]) {
+			expect(ids(await readTranscript(fakeThread(n)))).toEqual(range(0, n))
+		}
+	})
+
+	test('readTranscript keeps the first page and the newest 191 messages of a long thread', async () => {
+		for (const n of [212, 221, 500]) {
+			expect(ids(await readTranscript(fakeThread(n)))).toEqual([...range(0, 20), ...range(n - 191, n)])
+		}
+	})
+
+	test('readTranscript reads a short thread in one call', async () => {
+		const t = fakeThread(12)
+		let calls = 0
+		const counted = { messages: (o: Parameters<typeof t.messages>[0]) => (calls++, t.messages(o)) }
+		await readTranscript(counted)
+		expect(calls).toBe(1)
+	})
+
+	test('readTranscript falls back when full: true returns nothing', async () => {
+		expect(ids(await readTranscript(fakeThread(3, true)))).toEqual([0, 1, 2])
 	})
 
 	test('exitCode reads the shapes shell results come in', () => {
