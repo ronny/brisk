@@ -110,7 +110,7 @@ func (b *Backend) Answer(ctx context.Context, req risk.Request) (risk.Response, 
 		var r response
 		_ = json.Unmarshal(data, &r)
 		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500 {
-			lastErr = fmt.Errorf("openrouter: HTTP %d: %s", resp.StatusCode, snippet(data))
+			lastErr = fmt.Errorf("HTTP %d: %s", resp.StatusCode, snippet(data))
 			continue
 		}
 		if resp.StatusCode != http.StatusOK || r.Error != nil {
@@ -118,11 +118,11 @@ func (b *Backend) Answer(ctx context.Context, req risk.Request) (risk.Response, 
 			if r.Error != nil {
 				msg = r.Error.Message
 			}
-			return risk.Response{}, fmt.Errorf("openrouter: HTTP %d: %s", resp.StatusCode, msg)
+			return risk.Response{}, fmt.Errorf("HTTP %d: %s", resp.StatusCode, msg)
 		}
 		for name := range req.Questions {
 			if _, ok := r.Answers[name]; !ok {
-				return risk.Response{}, fmt.Errorf("openrouter: no answer for %q", name)
+				return risk.Response{}, fmt.Errorf("no answer for %q", name)
 			}
 		}
 		return risk.Response{Model: r.Model, Answers: r.Answers, Usage: &risk.Usage{InputTokens: r.Usage.InputTokens, CostUSD: r.Usage.Cost}}, nil
