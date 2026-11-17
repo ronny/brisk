@@ -51,11 +51,18 @@ type lineRule struct {
 	text  string
 	re    *regexp.Regexp
 	paths func(p string) bool // nil means every non-test, non-doc file
+	// inComments makes the rule match comment lines too: a secret is
+	// leaked whether or not it sits in a comment.
+	inComments bool
 }
 
+var camelBoundary = regexp.MustCompile(`([a-z0-9])([A-Z])`)
+
+// segs matches whole path segments, splitting camelCase too, so
+// "authService.ts" matches "auth" but "author.go" does not.
 func segs(names ...string) func(string) bool {
 	re := regexp.MustCompile(`(?i)(^|[/_.-])(` + strings.Join(names, "|") + `)([/_.-]|$)`)
-	return func(p string) bool { return re.MatchString(p) }
+	return func(p string) bool { return re.MatchString(camelBoundary.ReplaceAllString(p, "${1}_${2}")) }
 }
 
 func globs(patterns ...string) func(string) bool {
@@ -120,7 +127,7 @@ var builtinPathRules = []pathRule{
 	},
 	{
 		id: "auth", tier: risk.Medium, text: "Changes authentication or authorisation code",
-		match:  segs("auth", "authn", "authz", "oauth", "oidc", "permissions?", "rbac", "acl", "access", "login", "jwt", "passwords?", "csrf", "sessions?", "middleware", "policy", "policies", "guard", "guards", "roles?"),
+		match:  segs("auth", "authn", "authz", "oauth", "oidc", "permissions?", "rbac", "acl", "access_?control", "login", "jwt", "passwords?", "csrf", "sessions?", "middleware", "policy", "policies", "guard", "guards", "roles?"),
 		ignore: func(fc risk.FileChange) bool { return !codeOnly(fc.Path) },
 	},
 	{
@@ -155,6 +162,10 @@ var builtinPathRules = []pathRule{
 		ignore: func(fc risk.FileChange) bool { return IsDoc(fc.Path) || IsTest(fc.Path) },
 	},
 	{
+		id: "brisk_config", tier: risk.Medium, text: "Changes brisk's own risk rules",
+		match: globs(".brisk.yaml"),
+	},
+	{
 		id: "public_api", tier: risk.Medium, text: "Changes a public API definition",
 		match: globs("**/*.proto", "**/openapi*.y*ml", "**/openapi*.json", "**/swagger*.y*ml", "**/*.graphql", "**/schema.graphqls"),
 	},
@@ -170,16 +181,18 @@ var builtinLineRules = []lineRule{
 		id: "destructive_sql", tier: risk.High, text: "Adds destructive SQL",
 		re: regexp.MustCompile(`(?i:\bdrop\s+(table|column|schema|database|index|view|type)\b)|(?i:\balter\s+table\s+\S+\s+drop\b)|(?i:\btruncate\s+table\s+\w)|\bTRUNCATE\s+["\w]|(?i:\bdelete\s+from\s+["\w.]+\s*(;|$|["'` + "`" + `]))`),
 		paths: func(p string) bool {
-			return !IsTest(p) && sqlBearing.MatchString(p)
+			// A down migration undoes its up migration; dropping what
+			// the up file created is expected.
+			return !IsTest(p) && sqlBearing.MatchString(p) && !strings.HasSuffix(p, ".down.sql")
 		},
 	},
 	{
-		id: "secret_added", tier: risk.High, text: "Adds what looks like a secret",
+		id: "secret_added", tier: risk.High, text: "Adds what looks like a secret", inComments: true,
 		re:    regexp.MustCompile(`(AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY-----|\bsk-(live|proj|or-v1)?-?[A-Za-z0-9]{24,}|\bgh[pousr]_[A-Za-z0-9]{36}|\bxox[abprs]-[A-Za-z0-9-]{10,}|\bsk_live_[A-Za-z0-9]{16,})`),
 		paths: func(p string) bool { return !IsDoc(p) },
 	},
 	{
-		id: "tls_disabled", tier: risk.High, text: "Turns off TLS certificate checks",
+		id: "tls_disabled", tier: risk.High, text: "Turns off TLS certificate checks", inComments: true,
 		re: regexp.MustCompile(`(InsecureSkipVerify:\s*true|rejectUnauthorized:\s*false|NODE_TLS_REJECT_UNAUTHORIZED\s*=?\s*['"]?0|verify\s*=\s*False)`),
 	},
 	{
@@ -251,7 +264,7 @@ func Apply(cs *risk.ChangeSet, findings []risk.Finding, session *risk.Session, c
 				continue
 			}
 			for _, l := range added {
-				if r.re.MatchString(l.Text) && !isComment(l.Text) {
+				if r.re.MatchString(l.Text) && (r.inComments || !isComment(fc.Path, l.Text)) {
 					add(r.id, r.tier, r.text, "rule", risk.Evidence{Path: fc.Path, StartLine: l.N, EndLine: l.N})
 				}
 			}
@@ -324,9 +337,25 @@ func lastVerification(s *risk.Session) (risk.Command, bool) {
 	return risk.Command{}, false
 }
 
-func isComment(s string) bool {
-	t := strings.TrimSpace(s)
-	return strings.HasPrefix(t, "//") || strings.HasPrefix(t, "#") || strings.HasPrefix(t, "--") || strings.HasPrefix(t, "*") || strings.HasPrefix(t, "/*")
+// isComment reports whether line is a whole-line comment in the language of
+// path. A line that has code after a block comment closes is not.
+func isComment(p, line string) bool {
+	t := strings.TrimSpace(line)
+	switch strings.ToLower(path.Ext(p)) {
+	case ".sql":
+		return strings.HasPrefix(t, "--")
+	case ".py", ".rb", ".sh", ".yaml", ".yml", ".toml":
+		return strings.HasPrefix(t, "#")
+	}
+	if strings.HasPrefix(t, "//") {
+		return true
+	}
+	if strings.HasPrefix(t, "/*") {
+		end := strings.Index(t, "*/")
+		return end < 0 || strings.TrimSpace(t[end+2:]) == ""
+	}
+	// A "* " continuation line of a block comment, not a pointer write.
+	return t == "*" || strings.HasPrefix(t, "* ") && !strings.ContainsAny(t, "=(")
 }
 
 func truncate(s string, n int) string {

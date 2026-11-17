@@ -168,6 +168,9 @@ func injection(ctx context.Context, args []string) error {
 		return err
 	}
 	sort.Strings(paths)
+	if abs, _ := filepath.Abs(*work); abs == "/" || !strings.Contains(filepath.Base(abs), "inj") {
+		return fmt.Errorf("-work %q: use a scratch directory whose name contains \"inj\"; it is deleted first", *work)
+	}
 	os.RemoveAll(*work)
 
 	var runs map[string][]eval.Run

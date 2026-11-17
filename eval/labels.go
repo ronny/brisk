@@ -117,11 +117,11 @@ func Labels(ctx context.Context, repo *gitx.Repo, opts LabelOptions) ([]Label, e
 	}
 	head := all[len(all)-1].When
 	byShort := map[string]string{}
-	bySubject := map[string]string{}
+	bySubject := map[string][]string{} // oldest first
 	index := map[string]int{}
 	for i, c := range all {
 		byShort[c.SHA[:7]] = c.SHA
-		bySubject[c.Subject] = c.SHA
+		bySubject[c.Subject] = append(bySubject[c.Subject], c.SHA)
 		index[c.SHA] = i
 	}
 
@@ -158,7 +158,13 @@ func Labels(ctx context.Context, repo *gitx.Repo, opts LabelOptions) ([]Label, e
 				}
 			}
 		} else if m := revertSubject.FindStringSubmatch(c.Subject); m != nil {
-			reverted = bySubject[m[1]]
+			// The latest commit with that subject before the revert; a
+			// later re-land with the same subject is not what was reverted.
+			for _, sha := range bySubject[m[1]] {
+				if index[sha] < index[c.SHA] {
+					reverted = sha
+				}
+			}
 		}
 		if l := labels[reverted]; l != nil {
 			l.Reverted = true
@@ -206,17 +212,32 @@ func szz(ctx context.Context, repo *gitx.Repo, fix Commit) (map[string]bool, err
 	}
 	ranges := map[string][][2]int{}
 	file := ""
+	inHeader := false // between "diff --git" and the first hunk
 	sc := bufio.NewScanner(bytes.NewReader(out))
 	sc.Buffer(make([]byte, 0, 1<<20), 64<<20)
 	for sc.Scan() {
 		line := sc.Text()
 		switch {
-		case strings.HasPrefix(line, "--- "):
-			file = strings.TrimPrefix(strings.TrimPrefix(line, "--- "), "a/")
+		case strings.HasPrefix(line, "diff --git "):
+			inHeader, file = true, ""
+		case inHeader && strings.HasPrefix(line, "--- "):
+			// A removed "-- comment" line inside a hunk also starts
+			// with "--- ", so only read file names in the header.
+			file = strings.TrimSuffix(strings.TrimPrefix(line, "--- "), "\t")
+			if strings.HasPrefix(file, `"`) {
+				if u, err := strconv.Unquote(file); err == nil {
+					file = u
+				}
+			}
+			file = strings.TrimPrefix(file, "a/")
 			if file == "/dev/null" || rules.IsDoc(file) || rules.IsTest(file) || rules.IsGenerated(file) {
 				file = ""
 			}
-		case file != "" && strings.HasPrefix(line, "@@"):
+		case strings.HasPrefix(line, "@@"):
+			inHeader = false
+			if file == "" {
+				continue
+			}
 			m := hunkHeader.FindStringSubmatch(line)
 			if m == nil {
 				continue

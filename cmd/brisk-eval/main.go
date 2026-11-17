@@ -27,11 +27,11 @@ import (
 	"github.com/ronny/brisk/context/gitctx"
 	"github.com/ronny/brisk/eval"
 	"github.com/ronny/brisk/internal/gitx"
+	"github.com/ronny/brisk/lang"
 	"github.com/ronny/brisk/risk"
 )
 
-// languageBackends is replaced by lang.go once the lang package exists.
-var languageBackends = func() []risk.LanguageBackend { return nil }
+var languageBackends = lang.Backends
 
 func main() {
 	if len(os.Args) < 2 {
@@ -181,7 +181,7 @@ func prepare(ctx context.Context, args []string) error {
 	repeat := fs.Int("repeat", 5, "runs per request for the stability sample")
 	sample := fs.Int("repeat-sample", 200, "how many requests to repeat")
 	repeatOut := fs.String("repeat-out", "", "requests JSONL for the extra stability runs")
-	workers := fs.Int("workers", 8, "parallel workers")
+	workers := fs.Int("workers", 2, "commits prepared at once (each analyses up to 8 files at once)")
 	fs.Parse(args)
 	labels, err := eval.ReadJSONL[eval.Label](*labelsPath)
 	if err != nil {
@@ -434,8 +434,17 @@ func score(args []string) error {
 		if *fitOut != "" {
 			id = strings.TrimSuffix(filepath.Base(*fitOut), ".json")
 		}
+		// Overrides are policy, not fitted: keep the embedded table's, or
+		// the default table's for a new ID.
+		var overrides []calibration.Override
+		if old, ok := calibration.ByID(id); ok {
+			overrides = old.Overrides
+		} else if def, ok := calibration.ByID("default"); ok {
+			overrides = def.Overrides
+		}
 		table = eval.Fit(train, runs, eval.FitOptions{
-			ID: id, Models: uniq(modelIDs), HighBudget: *highBudget, MediumShare: *medShare, Features: splitList(*features),
+			Overrides: overrides,
+			ID:        id, Models: uniq(modelIDs), HighBudget: *highBudget, MediumShare: *medShare, Features: splitList(*features),
 			FittedOn: fmt.Sprintf("%d changes: the oldest %.0f%% of %s", len(train), *split*100, strings.Join(repos, ", ")),
 		})
 		table.Notes = "Fitted by brisk-eval score. Features: impact and uncertainty are Jev scores / 3, flags is the largest yes/no answer, history is prior fixes to the changed files."

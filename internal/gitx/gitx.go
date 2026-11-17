@@ -100,8 +100,23 @@ func (r *Repo) Changes(ctx context.Context, base, head string) (*risk.ChangeSet,
 			return nil, err
 		}
 		defer cleanup()
-		work = &Repo{Root: r.Root, Env: append(append([]string{}, r.Env...), "GIT_INDEX_FILE="+idx)}
-		if _, err := work.Run(ctx, "add", "-A", "--", "."); err != nil {
+		// git add writes blobs; send them to a scratch object directory
+		// so the repository is never written to.
+		objs, err := r.Run(ctx, "rev-parse", "--path-format=absolute", "--git-path", "objects")
+		if err != nil {
+			return nil, err
+		}
+		scratch, err := os.MkdirTemp("", "brisk-objects-*")
+		if err != nil {
+			return nil, err
+		}
+		defer os.RemoveAll(scratch)
+		work = &Repo{Root: r.Root, Env: append(append([]string{}, r.Env...),
+			"GIT_INDEX_FILE="+idx,
+			"GIT_OBJECT_DIRECTORY="+scratch,
+			"GIT_ALTERNATE_OBJECT_DIRECTORIES="+strings.TrimSpace(string(objs)),
+		)}
+		if _, err := work.Run(ctx, "-c", "core.splitIndex=false", "add", "-A", "--", "."); err != nil {
 			return nil, err
 		}
 		diffArgs = append(diffArgs, "--cached", baseID)
@@ -202,8 +217,11 @@ func (r *Repo) loadContents(ctx context.Context, base, head string, files []risk
 		if err != nil {
 			return fmt.Errorf("git cat-file: short output")
 		}
+		if strings.HasSuffix(header, " missing\n") {
+			continue
+		}
 		fields := strings.Fields(header)
-		if len(fields) < 3 || fields[1] == "missing" {
+		if len(fields) < 3 {
 			continue
 		}
 		size, _ := strconv.Atoi(fields[2])
@@ -224,7 +242,7 @@ func (r *Repo) loadContents(ctx context.Context, base, head string, files []risk
 }
 
 func readLimited(p string) ([]byte, error) {
-	st, err := os.Stat(p)
+	st, err := os.Lstat(p) // never follow a symlink out of the repository
 	if err != nil || st.Size() > MaxContent || !st.Mode().IsRegular() {
 		return nil, fmt.Errorf("skip")
 	}
@@ -271,9 +289,9 @@ func ParseDiff(raw []byte) ([]risk.FileChange, error) {
 				cur.Status = risk.Deleted
 			case strings.HasPrefix(line, "rename from "):
 				cur.Status = risk.Renamed
-				cur.OldPath = strings.TrimPrefix(line, "rename from ")
+				cur.OldPath = unquotePath(strings.TrimPrefix(line, "rename from "))
 			case strings.HasPrefix(line, "rename to "):
-				cur.Path = strings.TrimPrefix(line, "rename to ")
+				cur.Path = unquotePath(strings.TrimPrefix(line, "rename to "))
 			case strings.HasPrefix(line, "Binary files ") || line == "GIT binary patch":
 				cur.Binary = true
 			case strings.HasPrefix(line, "@@"):
@@ -331,6 +349,15 @@ func splitDiffHeader(s string) (string, string) {
 		return strings.TrimPrefix(s[:i], "a/"), s[i+3:]
 	}
 	return s, s
+}
+
+func unquotePath(s string) string {
+	if strings.HasPrefix(s, `"`) {
+		if u, err := strconv.Unquote(s); err == nil {
+			return u
+		}
+	}
+	return s
 }
 
 func unquoteFirst(s string) (string, string, bool) {

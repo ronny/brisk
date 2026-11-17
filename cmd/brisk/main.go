@@ -16,11 +16,11 @@ import (
 	"github.com/ronny/brisk/backend/openrouter"
 	"github.com/ronny/brisk/context/gitctx"
 	"github.com/ronny/brisk/internal/gitx"
+	"github.com/ronny/brisk/lang"
 	"github.com/ronny/brisk/risk"
 )
 
-// languageBackends is replaced by lang.go once the lang package exists.
-var languageBackends = func() []risk.LanguageBackend { return nil }
+var languageBackends = lang.Backends
 
 const usage = `usage: brisk assess [flags]
        brisk version

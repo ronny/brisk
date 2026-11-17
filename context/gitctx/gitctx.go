@@ -54,6 +54,11 @@ func LoadConfig(p string) ([]risk.PathRule, error) {
 	if err != nil {
 		return nil, err
 	}
+	return ParseConfig(p, b)
+}
+
+// ParseConfig parses .brisk.yaml content; p names it in errors.
+func ParseConfig(p string, b []byte) ([]risk.PathRule, error) {
 	var c Config
 	if err := yaml.Unmarshal(b, &c); err != nil {
 		return nil, fmt.Errorf("%s: %w", p, err)
@@ -80,11 +85,18 @@ func LoadConfig(p string) ([]risk.PathRule, error) {
 // Context implements risk.ContextProvider.
 func (p *Provider) Context(ctx context.Context, q risk.ContextQuery) (risk.ProjectContext, error) {
 	var pc risk.ProjectContext
-	cfg := p.ConfigPath
-	if cfg == "" {
-		cfg = filepath.Join(q.RepoRoot, ".brisk.yaml")
+	// The config comes from the base commit, so a change cannot loosen
+	// the rules that judge it. --config overrides it explicitly.
+	var rules []risk.PathRule
+	var err error
+	if p.ConfigPath != "" {
+		rules, err = LoadConfig(p.ConfigPath)
+	} else {
+		r := &gitx.Repo{Root: q.RepoRoot}
+		if b, gerr := r.Run(ctx, "show", q.Base+":.brisk.yaml"); gerr == nil {
+			rules, err = ParseConfig(q.Base+":.brisk.yaml", b)
+		}
 	}
-	rules, err := LoadConfig(cfg)
 	if err != nil {
 		return pc, err
 	}
@@ -128,10 +140,13 @@ type historyCache struct {
 	h    *history
 }
 
-// view is the history as seen from one base commit: positions >= start.
+// view is the history as seen from one base commit: positions >= start
+// that are ancestors of the base. The log is in date order, so commits from
+// branches merged after the base can sit among older positions.
 type view struct {
-	h     *history
-	start int
+	h         *history
+	start     int
+	ancestors map[string]bool // nil means every commit counts
 }
 
 // FixMessage matches commit subjects that describe a fix.
@@ -145,7 +160,11 @@ func (p *Provider) historyFor(ctx context.Context, root, base string) (view, err
 	defer p.mu.Unlock()
 	if p.history != nil && p.history.repo == root {
 		if i, ok := p.history.h.index[base]; ok {
-			return view{p.history.h, i}, nil
+			anc, err := ancestors(ctx, root, base)
+			if err != nil {
+				return view{}, err
+			}
+			return view{p.history.h, i, anc}, nil
 		}
 	}
 	max := p.MaxCommits
@@ -186,7 +205,19 @@ func (p *Provider) historyFor(ctx context.Context, root, base string) (view, err
 		}
 	}
 	p.history = &historyCache{repo: root, h: h}
-	return view{h, 0}, nil
+	return view{h: h}, nil
+}
+
+func ancestors(ctx context.Context, root, base string) (map[string]bool, error) {
+	out, err := (&gitx.Repo{Root: root}).Run(ctx, "rev-list", "--no-merges", base)
+	if err != nil {
+		return nil, err
+	}
+	m := map[string]bool{}
+	for _, l := range strings.Fields(string(out)) {
+		m[l] = true
+	}
+	return m, nil
 }
 
 func (v view) summarise(path string) risk.FileHistory {
@@ -197,7 +228,7 @@ func (v view) summarise(path string) risk.FileHistory {
 	authors := map[string]bool{}
 	since := v.h.commits[v.start].when.Add(-90 * 24 * time.Hour)
 	for _, i := range v.h.byFile[path] {
-		if i < v.start {
+		if i < v.start || v.ancestors != nil && !v.ancestors[v.h.commits[i].id] {
 			continue
 		}
 		c := v.h.commits[i]

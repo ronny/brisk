@@ -31,7 +31,8 @@ func Score(recs []Record, runs map[string][]Run, t *calibration.Table, run int) 
 			a := rs[run]
 			s.Answered, s.Model, s.ModelMS = true, a.Model, a.MS
 			s.ModelRisk = t.Risk(assess.Features(a.Answers, r.History, assess.SizeFeature(r.Stats.Additions+r.Stats.Deletions)))
-			s.Tier = risk.Max(r.Floor, assess.ModelTier(t, s.ModelRisk))
+			mt, _ := assess.ModelTier(t, s.ModelRisk, a.Answers)
+			s.Tier = risk.Max(r.Floor, mt)
 		}
 		out = append(out, s)
 	}
@@ -113,7 +114,8 @@ func BootstrapAPDiff(a, b []float64, bad []bool, n int, seed uint64) Interval {
 	if len(ds) == 0 {
 		return Interval{Value: diff}
 	}
-	return Interval{Value: diff, Low: ds[int(0.025*float64(len(ds)))], High: ds[int(0.975*float64(len(ds)-1))]}
+	q := func(p float64) float64 { return ds[int(p*float64(len(ds)-1))] }
+	return Interval{Value: diff, Low: q(0.025), High: q(0.975)}
 }
 
 // Proportion is k of n with a Wilson 95% interval.

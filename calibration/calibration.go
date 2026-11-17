@@ -26,8 +26,13 @@ type Table struct {
 	// lines on a log scale, 0–1).
 	Weights    map[string]float64 `json:"weights"`
 	Thresholds Thresholds         `json:"thresholds"`
-	FittedOn   string             `json:"fitted_on,omitempty"`
-	Notes      string             `json:"notes,omitempty"`
+	// Overrides raise the model tier when one answer alone is strong
+	// enough, such as a near-certain yes to "weakens access checks" on a
+	// small diff the weighted risk would leave Low. They are set by hand,
+	// not fitted: outcome labels are too sparse for these rare cases.
+	Overrides []Override `json:"overrides,omitempty"`
+	FittedOn  string     `json:"fitted_on,omitempty"`
+	Notes     string     `json:"notes,omitempty"`
 }
 
 // Thresholds are the model risks at which the model alone supports Medium
@@ -35,6 +40,15 @@ type Table struct {
 type Thresholds struct {
 	Medium float64 `json:"medium"`
 	High   float64 `json:"high"`
+}
+
+// Override raises the model tier to Tier when the answer to Question is at
+// least Min: the noul probability for yes/no questions, the score for
+// score questions.
+type Override struct {
+	Question string  `json:"question"`
+	Min      float64 `json:"min"`
+	Tier     string  `json:"tier"` // "medium" or "high"
 }
 
 // Risk combines features into a 0–1 risk.
@@ -88,6 +102,20 @@ func For(model string) (*Table, bool, error) {
 		return nil, false, fmt.Errorf("no calibration for %q and no default", model)
 	}
 	return def, false, nil
+}
+
+// ByID returns the embedded table with this ID.
+func ByID(id string) (*Table, bool) {
+	all, err := All()
+	if err != nil {
+		return nil, false
+	}
+	for _, t := range all {
+		if t.ID == id {
+			return t, true
+		}
+	}
+	return nil, false
 }
 
 // All returns every embedded table.

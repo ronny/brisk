@@ -105,8 +105,9 @@ func (e *Engine) analyze(ctx context.Context, cs *risk.ChangeSet) []risk.Finding
 	if len(e.Lang) == 0 {
 		return nil
 	}
-	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
-	defer cancel()
+	// No shared deadline: a deadline that some files miss on a busy
+	// machine would make the findings, the floor, and the request ID depend
+	// on timing. Each file gets a generous limit only to stop a hang.
 	var mu sync.Mutex
 	var out []risk.Finding
 	var wg sync.WaitGroup
@@ -131,7 +132,9 @@ func (e *Engine) analyze(ctx context.Context, cs *risk.ChangeSet) []risk.Finding
 						mu.Unlock()
 					}
 				}()
-				fs, err := lb.Analyze(ctx, f)
+				fctx, cancel := context.WithTimeout(ctx, FileTimeout)
+				defer cancel()
+				fs, err := lb.Analyze(fctx, f)
 				mu.Lock()
 				defer mu.Unlock()
 				if err != nil {
@@ -145,16 +148,28 @@ func (e *Engine) analyze(ctx context.Context, cs *risk.ChangeSet) []risk.Finding
 	}
 	wg.Wait()
 	sort.Slice(out, func(i, j int) bool {
-		if out[i].Path != out[j].Path {
-			return out[i].Path < out[j].Path
+		a, b := out[i], out[j]
+		switch {
+		case a.Path != b.Path:
+			return a.Path < b.Path
+		case a.StartLine != b.StartLine:
+			return a.StartLine < b.StartLine
+		case a.Kind != b.Kind:
+			return a.Kind < b.Kind
+		case a.EndLine != b.EndLine:
+			return a.EndLine < b.EndLine
+		case a.Symbol != b.Symbol:
+			return a.Symbol < b.Symbol
+		case a.Language != b.Language:
+			return a.Language < b.Language
 		}
-		if out[i].StartLine != out[j].StartLine {
-			return out[i].StartLine < out[j].StartLine
-		}
-		return out[i].Kind < out[j].Kind
+		return a.Detail < b.Detail
 	})
 	return out
 }
+
+// FileTimeout bounds language analysis of one file.
+var FileTimeout = 20 * time.Second
 
 // Run prepares and answers with backend b. When b fails, the assessment is
 // rules only and says why in provenance.degraded.
@@ -203,9 +218,11 @@ func SizeFeature(lines int) float64 {
 // the calibration's features.
 func Features(answers map[string]risk.Answer, history, size float64) map[string]float64 {
 	f := map[string]float64{}
+	// Clamp: host answers come from outside and may be out of range.
+	clamp := func(x float64) float64 { return math.Min(1, math.Max(0, x)) }
 	score := func(name string) float64 {
 		if a, ok := answers[name]; ok && a.Score != nil {
-			return *a.Score / 3
+			return clamp(*a.Score / 3)
 		}
 		return 0
 	}
@@ -213,8 +230,8 @@ func Features(answers map[string]risk.Answer, history, size float64) map[string]
 	f["uncertainty"] = score("uncertainty")
 	f["impact_x_uncertainty"] = f["impact"] * f["uncertainty"]
 	for _, a := range answers {
-		if a.Type == "noul" && a.Noul != nil && *a.Noul > f["flags"] {
-			f["flags"] = *a.Noul
+		if a.Type == "noul" && a.Noul != nil && clamp(*a.Noul) > f["flags"] {
+			f["flags"] = clamp(*a.Noul)
 		}
 	}
 	f["history"] = history
@@ -222,15 +239,35 @@ func Features(answers map[string]risk.Answer, history, size float64) map[string]
 	return f
 }
 
-// ModelTier is the tier the calibrated model risk alone supports.
-func ModelTier(t *calibration.Table, risk01 float64) risk.Tier {
+// ModelTier is the tier the model supports: from the calibrated risk, raised
+// by any override whose answer is strong enough. It also returns the
+// overrides that fired.
+func ModelTier(t *calibration.Table, risk01 float64, answers map[string]risk.Answer) (risk.Tier, []calibration.Override) {
+	tier := risk.Low
 	switch {
 	case risk01 >= t.Thresholds.High:
-		return risk.High
+		tier = risk.High
 	case risk01 >= t.Thresholds.Medium:
-		return risk.Medium
+		tier = risk.Medium
 	}
-	return risk.Low
+	var fired []calibration.Override
+	for _, o := range t.Overrides {
+		a, ok := answers[o.Question]
+		if !ok {
+			continue
+		}
+		v := a.Noul
+		if a.Score != nil {
+			v = a.Score
+		}
+		ot, err := risk.ParseTier(o.Tier)
+		if v == nil || err != nil || *v < o.Min {
+			continue
+		}
+		fired = append(fired, o)
+		tier = risk.Max(tier, ot)
+	}
+	return tier, fired
 }
 
 // Finish builds the assessment. resp is nil for rules only.
@@ -279,11 +316,12 @@ func (p *Prepared) Finish(backend string, resp *risk.Response, degraded string) 
 				a.Provenance.Calibration += " (no table for " + calibration.Normalise(resp.Model) + ")"
 			}
 			feats := Features(resp.Answers, p.History(), SizeFeature(a.Stats.Additions+a.Stats.Deletions))
-			r := math.Round(table.Risk(feats)*1000) / 1000
-			a.Provenance.ModelRisk = &r
+			r := table.Risk(feats)
+			shown := math.Round(r*1000) / 1000 // rounded for display only
+			a.Provenance.ModelRisk = &shown
 			a.Impact = round2(feats["impact"] * 3)
 			a.Uncertainty = round2(feats["uncertainty"] * 3)
-			modelTier := ModelTier(table, r)
+			modelTier, _ := ModelTier(table, r, resp.Answers)
 			a.Tier = risk.Max(p.Floor, modelTier)
 			if modelTier > risk.Low {
 				candidates = append(candidates, modelReasons(resp.Answers, modelTier)...)

@@ -17,6 +17,9 @@ type FitOptions struct {
 	// Features limits the fit to these features (for ablations); empty
 	// means all.
 	Features []string
+	// Overrides are kept in the table; the thresholds count the changes
+	// they already raise against the budget.
+	Overrides []calibration.Override
 }
 
 // FeatureNames are every feature a table can weight.
@@ -26,7 +29,7 @@ var FeatureNames = []string{"impact", "uncertainty", "impact_x_uncertainty", "fl
 // records, then thresholds that meet the flag budget. It searches a 0.1
 // grid on the simplex, which is coarse on purpose: the training set is small.
 func Fit(train []Record, runs map[string][]Run, opts FitOptions) *calibration.Table {
-	best := &calibration.Table{ID: opts.ID, Models: opts.Models, FittedOn: opts.FittedOn}
+	best := &calibration.Table{ID: opts.ID, Models: opts.Models, FittedOn: opts.FittedOn, Overrides: opts.Overrides}
 	bestAP := -1.0
 	featureNames := FeatureNames
 	if len(opts.Features) > 0 {
@@ -62,21 +65,23 @@ func Fit(train []Record, runs map[string][]Run, opts FitOptions) *calibration.Ta
 	}
 	walk(0, 10, make([]int, len(featureNames)))
 
-	// Thresholds from the budget.
-	ss := Score(train, runs, &calibration.Table{Weights: best.Weights, Thresholds: calibration.Thresholds{Medium: 2, High: 2}}, 0)
+	// Thresholds from the budget. With unreachable thresholds, each
+	// change's tier is its floor raised by any override.
+	ss := Score(train, runs, &calibration.Table{Weights: best.Weights, Overrides: opts.Overrides, Thresholds: calibration.Thresholds{Medium: 2, High: 2}}, 0)
 	best.Thresholds.High = threshold(ss, risk.High, opts.HighBudget)
 	best.Thresholds.Medium = math.Min(best.Thresholds.High, threshold(ss, risk.Medium, opts.MediumShare))
 	return best
 }
 
 // threshold returns the lowest model-risk cut such that the share of
-// changes at tier or above (counting rule floors) stays within share.
+// changes at tier or above (counting rule floors and overrides) stays
+// within share.
 func threshold(ss []Scored, tier risk.Tier, share float64) float64 {
 	limit := int(math.Floor(share * float64(len(ss))))
 	already := 0
 	var cand []float64
 	for _, s := range ss {
-		if s.Floor >= tier {
+		if s.Tier >= tier {
 			already++
 		} else if s.Answered {
 			cand = append(cand, s.ModelRisk)
