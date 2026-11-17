@@ -221,3 +221,59 @@ func TestEmptyChangeHostPrintsAssessment(t *testing.T) {
 		t.Fatalf("empty change should print a Low assessment, got %s (%v)", out, err)
 	}
 }
+
+func assessJSON(t *testing.T, args ...string) risk.Assessment {
+	t.Helper()
+	code, out, errs := runCLI(t, append([]string{"assess", "--format", "json"}, args...)...)
+	if code != 0 {
+		t.Fatalf("exit %d: %s", code, errs)
+	}
+	var a risk.Assessment
+	if err := json.Unmarshal([]byte(out), &a); err != nil {
+		t.Fatal(err, out)
+	}
+	return a
+}
+
+// Collecting the working tree must not run a clean filter, which a change
+// could rewrite to run any command.
+func TestWorkingTreeRunsNoCleanFilter(t *testing.T) {
+	dir := newRepo(t)
+	write(t, dir, ".gitattributes", "*.foo filter=review\n")
+	write(t, dir, "clean.sh", "#!/bin/sh\ncat\n")
+	write(t, dir, "data.foo", "one\n")
+	git(t, dir, "add", "-A")
+	git(t, dir, "commit", "-q", "-m", "filter")
+	git(t, dir, "config", "filter.review.clean", "sh clean.sh")
+	git(t, dir, "config", "filter.review.required", "true")
+	write(t, dir, "clean.sh", "#!/bin/sh\nprintf ran > executed-by-assess\ncat\n")
+	write(t, dir, "data.foo", "two\n")
+
+	a := assessJSON(t, "--repo", dir, "--base", "HEAD")
+	if _, err := os.Stat(filepath.Join(dir, "executed-by-assess")); err == nil {
+		t.Fatal("assess ran the change's clean filter")
+	}
+	if a.Stats.Files != 2 {
+		t.Fatalf("files %d, want 2 (clean.sh and data.foo)", a.Stats.Files)
+	}
+}
+
+// A change's own .gitattributes cannot mark code as binary to hide it,
+// in the working tree or between commits.
+func TestGitattributesCannotHideCode(t *testing.T) {
+	dir := newRepo(t)
+	write(t, dir, "query.sql", "SELECT * FROM users;\n")
+	git(t, dir, "add", "-A")
+	git(t, dir, "commit", "-q", "-m", "query")
+	write(t, dir, "query.sql", "DROP TABLE users;\n")
+	write(t, dir, ".gitattributes", "*.sql -diff\n")
+
+	if a := assessJSON(t, "--repo", dir, "--base", "HEAD"); a.Floor != risk.High {
+		t.Fatalf("working tree: floor %s hits %v, want high from destructive_sql", a.Floor, a.Provenance.RuleHits)
+	}
+	git(t, dir, "add", "-A")
+	git(t, dir, "commit", "-q", "-m", "drop")
+	if a := assessJSON(t, "--repo", dir, "--base", "HEAD~1", "--head", "HEAD"); a.Floor != risk.High {
+		t.Fatalf("commits: floor %s hits %v, want high from destructive_sql", a.Floor, a.Provenance.RuleHits)
+	}
+}

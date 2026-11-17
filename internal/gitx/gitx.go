@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/ronny/brisk/risk"
 )
@@ -35,8 +36,25 @@ func Open(ctx context.Context, dir string) (*Repo, error) {
 }
 
 // Run runs git with args and returns stdout.
+//
+// Git reads no attributes from the repository's trees or working tree:
+// the change being assessed must not decide how it is read. A candidate
+// .gitattributes could otherwise mark source as binary (-diff) to hide it,
+// or bind a configured clean filter, which `git add` would run. Attributes
+// come only from $GIT_DIR/info/attributes. fsmonitor hooks are off too.
 func (r *Repo) Run(ctx context.Context, args ...string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, "git", append([]string{"-c", "core.quotePath=false", "-c", "color.ui=false"}, args...)...)
+	safe := []string{"-c", "core.quotePath=false", "-c", "color.ui=false",
+		"-c", "core.attributesFile=" + os.DevNull, "-c", "core.fsmonitor=false"}
+	if tree, err := emptyTree(ctx, r.Root); err != nil {
+		return nil, err
+	} else if tree != "" {
+		safe = append(safe, "--attr-source="+tree)
+	}
+	return r.run(ctx, append(safe, args...)...)
+}
+
+func (r *Repo) run(ctx context.Context, args ...string) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = r.Root
 	cmd.Env = append(append(os.Environ(), "GIT_OPTIONAL_LOCKS=0", "LC_ALL=C"), r.Env...)
 	var stderr bytes.Buffer
@@ -46,6 +64,31 @@ func (r *Repo) Run(ctx context.Context, args ...string) ([]byte, error) {
 		return out, fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
 	}
 	return out, nil
+}
+
+var emptyTrees sync.Map // repository root → empty tree ID for its hash
+
+// emptyTree returns the empty tree ID in root's object format, or "" when
+// root is not inside a repository (git then reads no tree attributes).
+func emptyTree(ctx context.Context, root string) (string, error) {
+	if v, ok := emptyTrees.Load(root); ok {
+		return v.(string), nil
+	}
+	out, err := (&Repo{Root: root}).run(ctx, "rev-parse", "--show-object-format")
+	if err != nil {
+		return "", nil // not a repository; the real command reports it
+	}
+	var tree string
+	switch f := strings.TrimSpace(string(out)); f {
+	case "sha1":
+		tree = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+	case "sha256":
+		tree = "6ef19b41225c5369f1c104d45d8d85efa9b057b53b14b4b9b939dd74decc5321"
+	default:
+		return "", fmt.Errorf("unsupported git object format %q", f)
+	}
+	emptyTrees.Store(root, tree)
+	return tree, nil
 }
 
 // RevParse resolves a revision to a commit ID.
