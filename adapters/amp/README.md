@@ -5,7 +5,7 @@ An Amp directory plugin that rates the risk of a thread's code changes with the 
 - After each agent turn that edits files or runs commands, it labels the thread `risk-low`, `risk-medium`, or `risk-high`, replacing the previous risk label.
 - For Medium and High it shows a **Review risky changes** quick action that asks the agent to check each reason.
 - For Medium and High it adds a line to the Ship and Push to Branch prompt, such as `Risk: High (Changes CanAccess). Before pushing, review …`.
-- Optional, off by default: a confirmation before Ship or Push to Branch on a High-risk change, which only a person can answer. Declining cancels the turn.
+- Optional, off by default and turned on per project in user settings: a confirmation before Ship or Push to Branch on a High-risk or unassessed change, which only a person can answer. Declining cancels the turn.
 
 The plugin builds a [session record](../../schema/session.schema.json) from the thread (intent, edited files, shell commands with exit codes, user corrections, the agent's last summary) and passes it with `--session`.
 
@@ -22,14 +22,16 @@ If `amp.ai.decide` fails (for example the workspace disabled Jev), the plugin sh
 
 ## Settings
 
-Set these in Amp settings. To apply one to a single project, put it in that repository's `.amp/settings.json` with an `amp.` prefix, for example `{ "amp.brisk.confirmShipOnHigh": true }`.
+brisk reads its settings only from your user settings (`~/.config/amp/settings.json` or `.jsonc`) and the machine's managed settings (`/etc/ampcode/managed-settings.json`, or the macOS and Windows equivalents; managed wins). It ignores a repository's `.amp/settings.json`, because the change being rated could edit that file to choose the binary that rates it, lower the backend, or turn the confirmation off.
 
 | Key | Default | |
 | --- | --- | --- |
-| `brisk.binary` | `brisk` on `PATH` | Path to the brisk binary |
-| `brisk.backend` | `auto` | See above |
-| `brisk.base` | brisk's default | Base ref to compare against |
-| `brisk.confirmShipOnHigh` | `false` | Ask a person to confirm Ship or Push to Branch on High risk |
+| `amp.brisk.binary` | `brisk` on `PATH` | A command name, or an absolute or `~/` path outside the project. A name is looked up on `PATH`, skipping relative entries and entries inside the project. Other values fall back to `brisk` |
+| `amp.brisk.backend` | `auto` | See above |
+| `amp.brisk.base` | brisk's default | Base ref to compare against |
+| `amp.brisk.confirmShipOnHigh` | off | `true` for every project, or a list of project roots, such as `["~/src/payments"]`. Before Ship or Push to Branch on a High-risk change, or when brisk could not assess the changes, a person must confirm; declining cancels the turn |
+
+When an assessment fails (for example brisk refuses answers for an earlier version of the change), the thread gets `risk-unknown` in place of its old risk label, the review action goes away, and the Ship prompt says the risk is unknown.
 
 ## Install
 

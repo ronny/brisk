@@ -1,10 +1,12 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
-import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import type { ThreadMessage } from '@ampcode/plugin'
+import type { PluginAPI, ThreadMessage } from '@ampcode/plugin'
+import plugin from '../index.ts'
 import { assess, type Assessment } from '../src/brisk.ts'
-import { labelsFor, shipLine, summary } from '../src/present.ts'
+import { labelsFor, shipGate, shipLine, summary, unknownLine } from '../src/present.ts'
+import { readTrusted, resolveBinary, settingsFrom, stripJSONC } from '../src/settings.ts'
 import { buildSession, exitCode, readTranscript, turnsFromMessages, type Helpers } from '../src/session.ts'
 
 const floor: Assessment = {
@@ -95,6 +97,20 @@ describe('assess', () => {
 describe('present', () => {
 	test('labelsFor replaces only the old risk label', () => {
 		expect(labelsFor(['wip', 'risk-low'], 'high')).toEqual(['wip', 'risk-high'])
+	})
+	test('labelsFor marks a failed assessment unknown', () => {
+		expect(labelsFor(['risk-low', 'wip'], 'unknown')).toEqual(['wip', 'risk-unknown'])
+	})
+	test('shipGate asks for High and for unassessed changes, only when turned on', () => {
+		const high = { assessment: { ...floor, tier: 'high' as const } }
+		expect(shipGate(false, high)).toBeUndefined()
+		expect(shipGate(false, { error: 'x' })).toBeUndefined()
+		expect(shipGate(true, { assessment: floor })).toBeUndefined()
+		expect(shipGate(true, high)?.title).toBe('Ship a High-risk change?')
+		expect(shipGate(true, { error: 'answers are for request r0' })).toEqual({
+			title: 'Ship an unassessed change?',
+			message: expect.stringContaining('answers are for request r0'),
+		})
 	})
 	test('shipLine is only for Medium and High', () => {
 		expect(shipLine({ ...floor, tier: 'low' })).toBeUndefined()
@@ -208,5 +224,178 @@ describe('session', () => {
 		expect(exitCode('{not json} exit code: 3')).toBe(3)
 		expect(exitCode([{ type: 'text', text: 'exit code: 127' }])).toBe(127)
 		expect(exitCode('all good')).toBeUndefined()
+	})
+})
+
+describe('settings', () => {
+	const root = '/work/repo'
+	test('reads only amp.brisk keys and resolves the backend', () => {
+		expect(settingsFrom({}, root, {})).toEqual({ bin: 'brisk', mode: 'amp', base: undefined, confirmShip: false })
+		expect(settingsFrom({}, root, { OPENROUTER_API_KEY: 'k' }).mode).toBe('binary')
+		expect(settingsFrom({ 'amp.brisk.backend': 'rules-only', 'amp.brisk.base': 'origin/dev' }, root, {})).toMatchObject({ mode: 'rules-only', base: 'origin/dev' })
+	})
+	test('a binary inside the project or a relative path falls back to brisk on PATH', () => {
+		const bin = (v: string) => settingsFrom({ 'amp.brisk.binary': v }, root, {}, '/home/u').bin
+		expect(bin('/opt/brisk/bin/brisk')).toBe('/opt/brisk/bin/brisk')
+		expect(bin('~/bin/brisk')).toBe('/home/u/bin/brisk')
+		expect(bin('brisk-dev')).toBe('brisk-dev')
+		expect(bin('/work/repo/tools/brisk')).toBe('brisk')
+		expect(bin('/work/repo/../repo/x')).toBe('brisk')
+		expect(bin('./tools/brisk')).toBe('brisk')
+		expect(bin('tools/brisk')).toBe('brisk')
+		expect(bin('/work/repo2/brisk')).toBe('/work/repo2/brisk')
+	})
+	test('resolveBinary skips PATH entries that are relative or inside the project', async () => {
+		const d = await mkdtemp(join(tmpdir(), 'brisk-path-'))
+		const root = join(d, 'repo')
+		for (const sub of ['repo/bin', 'repo/.direnv', 'tools']) {
+			await mkdir(join(d, sub), { recursive: true })
+			await writeFile(join(d, sub, 'brisk'), '#!/bin/sh\n')
+			await chmod(join(d, sub, 'brisk'), 0o755)
+		}
+		const prev = process.cwd()
+		process.chdir(root)
+		try {
+			expect(await resolveBinary('brisk', root, ['bin', join(root, '.direnv'), join(d, 'tools')].join(':'))).toBe(join(d, 'tools', 'brisk'))
+			expect(resolveBinary('brisk', root, ['bin', join(root, '.direnv')].join(':'))).rejects.toThrow('not found outside the project')
+			expect(resolveBinary(join(root, 'bin', 'brisk'), root, '')).rejects.toThrow('not found outside the project')
+		} finally {
+			process.chdir(prev)
+		}
+		await rm(d, { recursive: true, force: true })
+	})
+	test('confirmShipOnHigh is true for all projects or a list of project roots', () => {
+		const on = (v: unknown, r = root) => settingsFrom({ 'amp.brisk.confirmShipOnHigh': v }, r, {}, '/home/u').confirmShip
+		expect(on(true)).toBe(true)
+		expect(on('true')).toBe(false)
+		expect(on(['/work/repo/'])).toBe(true)
+		expect(on(['~/src/app'], '/home/u/src/app')).toBe(true)
+		expect(on(['/work/other'])).toBe(false)
+	})
+	test('readTrusted merges JSONC files in order and skips missing ones', async () => {
+		const d = await mkdtemp(join(tmpdir(), 'brisk-settings-'))
+		await writeFile(join(d, 'user.jsonc'), '{\n  // mine\n  "amp.brisk.binary": "/a/b", /* x */ "amp.brisk.base": "main",\n}')
+		await writeFile(join(d, 'managed.json'), '{"amp.brisk.base": "origin/main"}')
+		expect(await readTrusted([join(d, 'missing.json'), join(d, 'user.jsonc'), join(d, 'managed.json')])).toEqual({
+			'amp.brisk.binary': '/a/b',
+			'amp.brisk.base': 'origin/main',
+		})
+		expect(JSON.parse(stripJSONC('{"u": "http://x/*y*/", // c\n"v": [1,],}'))).toEqual({ u: 'http://x/*y*/', v: [1] })
+		await rm(d, { recursive: true, force: true })
+	})
+})
+
+// Drives index.ts handlers through a fake plugin API and the fake brisk.
+describe('plugin', () => {
+	type Handler = (event: unknown, ctx: unknown) => Promise<unknown>
+	async function setup(user: Record<string, unknown>) {
+		const home = await mkdtemp(join(tmpdir(), 'brisk-home-'))
+		const root = await mkdtemp(join(tmpdir(), 'brisk-root-'))
+		await mkdir(join(home, '.config', 'amp'), { recursive: true })
+		await writeFile(join(home, '.config', 'amp', 'settings.json'), JSON.stringify(user))
+		// The project tries to run its own binary and turn the confirmation off.
+		const evil = join(root, 'evil')
+		await writeFile(evil, `#!/bin/sh\ntouch ${root}/evil-ran\nexit 1\n`)
+		await chmod(evil, 0o755)
+		const project = { 'amp.brisk.binary': evil, 'amp.brisk.confirmShipOnHigh': false, 'amp.brisk.backend': 'rules-only' }
+		await mkdir(join(root, '.amp'))
+		await writeFile(join(root, '.amp', 'settings.json'), JSON.stringify(project))
+		process.env.HOME = home
+
+		const handlers = new Map<string, Handler>()
+		let labels = ['risk-low']
+		let labelsDown = false
+		const confirms: unknown[] = []
+		let cancelled = 0
+		const thread = {
+			id: 'T-1',
+			title: { get: async () => 'Fix login' },
+			messages: async () => [],
+			labels: async () => {
+				if (labelsDown) throw new Error('labels down')
+				return labels
+			},
+			setLabels: async (l: string[]) => void (labels = l),
+			createQuickAction: () => ({ update() {}, unsubscribe() {} }),
+			cancel: async () => void cancelled++,
+		}
+		const amp = {
+			on: (name: string, h: Handler) => void handlers.set(name, h),
+			registerCommand() {},
+			onDispose() {},
+			// What Amp's merged configuration would return: the project wins.
+			configuration: { get: async () => ({ ...user, ...project }) },
+			system: { workspaceRoot: 'file://' + root },
+			helpers: { filePathFromURI: (u: string) => u.replace('file://', ''), toolCallsInMessages: () => [], filesModifiedByToolCall: () => [], shellCommandFromToolCall: () => undefined },
+		}
+		plugin(amp as unknown as PluginAPI)
+		const ctx = {
+			thread,
+			logger: { log() {} },
+			ai: { decide: async () => ({ model: 'jev-test', answers: {} }) },
+			ui: { confirm: async (o: unknown) => (confirms.push(o), false) },
+		}
+		const fire = (name: string, event: object) => handlers.get(name)!({ thread, ...event }, ctx)
+		return { root, home, fire, confirms, labels: () => labels, cancelled: () => cancelled, setLabelsDown: (v: boolean) => void (labelsDown = v) }
+	}
+
+	test('a failed reassessment replaces a stale Low label, notes it in Ship, and needs a person', async () => {
+		const p = await setup({ 'amp.brisk.binary': bin, 'amp.brisk.backend': 'amp', 'amp.brisk.confirmShipOnHigh': [] as string[] })
+		await writeFile(join(p.home, '.config', 'amp', 'settings.json'), JSON.stringify({ 'amp.brisk.binary': bin, 'amp.brisk.backend': 'amp', 'amp.brisk.confirmShipOnHigh': [p.root] }))
+		process.env.FAKE_FAIL = '1'
+		try {
+			await p.fire('agent.end', { status: 'done', messages: [] })
+			expect(p.labels()).toEqual(['risk-unknown'])
+			const prompt = (await p.fire('changes.prompt', {})) as { append: string }
+			expect(prompt.append).toStartWith('Risk: unknown (brisk could not assess these changes: brisk assess failed: boom)')
+			expect(await p.fire('agent.start', { changesWorkflow: 'ship' })).toEqual({})
+			expect(p.confirms).toEqual([expect.objectContaining({ title: 'Ship an unassessed change?', requireHuman: true })])
+			expect(p.cancelled()).toBe(1)
+		} finally {
+			delete process.env.FAKE_FAIL
+		}
+		expect(await Bun.file(join(p.root, 'evil-ran')).exists()).toBe(false)
+
+		// Once brisk works again the label and gate follow the new tier.
+		await p.fire('agent.start', { changesWorkflow: 'ship' })
+		expect(p.labels()).toEqual(['risk-high'])
+		expect(p.confirms[1]).toMatchObject({ title: 'Ship a High-risk change?', requireHuman: true })
+		await rm(p.root, { recursive: true, force: true })
+		await rm(p.home, { recursive: true, force: true })
+	})
+
+	test('project settings cannot pick the binary or turn the confirmation off', async () => {
+		const p = await setup({ 'amp.brisk.binary': bin, 'amp.brisk.confirmShipOnHigh': true })
+		await p.fire('agent.start', { changesWorkflow: 'ship' })
+		expect(await Bun.file(join(p.root, 'evil-ran')).exists()).toBe(false)
+		expect(p.labels()).toEqual(['risk-high'])
+		expect(p.confirms).toEqual([expect.objectContaining({ title: 'Ship a High-risk change?', requireHuman: true })])
+		await rm(p.root, { recursive: true, force: true })
+		await rm(p.home, { recursive: true, force: true })
+	})
+
+	test('a label error does not break later runs or the gate', async () => {
+		const p = await setup({ 'amp.brisk.binary': bin, 'amp.brisk.confirmShipOnHigh': true })
+		p.setLabelsDown(true)
+		process.env.FAKE_FAIL = '1'
+		try {
+			await p.fire('agent.end', { status: 'done', messages: [] })
+		} finally {
+			delete process.env.FAKE_FAIL
+		}
+		p.setLabelsDown(false)
+		expect(await p.fire('agent.start', { changesWorkflow: 'ship' })).toEqual({})
+		expect(p.labels()).toEqual(['risk-high'])
+		expect(p.confirms).toEqual([expect.objectContaining({ title: 'Ship a High-risk change?' })])
+		await rm(p.root, { recursive: true, force: true })
+		await rm(p.home, { recursive: true, force: true })
+	})
+
+	test('without the user setting, Ship is not gated', async () => {
+		const p = await setup({ 'amp.brisk.binary': bin })
+		expect(await p.fire('agent.start', { changesWorkflow: 'ship' })).toEqual({})
+		expect(p.confirms).toEqual([])
+		await rm(p.root, { recursive: true, force: true })
+		await rm(p.home, { recursive: true, force: true })
 	})
 })

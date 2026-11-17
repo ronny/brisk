@@ -1,105 +1,85 @@
 // brisk for Amp: rates the risk of a thread's code changes with the brisk
 // binary and shows it as a thread label, a quick action, and a line in the
-// Ship prompt. Advisory unless a project turns on brisk.confirmShipOnHigh.
+// Ship prompt. Advisory unless the user turns on brisk.confirmShipOnHigh for
+// a project. Settings come only from user and managed settings files; see
+// src/settings.ts.
 
 import type { PluginAPI, PluginThread, QuickAction } from '@ampcode/plugin'
-import { assess, type Decide, type Mode, type RunResult } from './src/brisk.ts'
-import { labelsFor, reviewMessage, shipLine, summary } from './src/present.ts'
+import { assess, type Decide, type RunResult } from './src/brisk.ts'
+import { labelsFor, reviewMessage, shipGate, shipLine, summary, unknownLine } from './src/present.ts'
 import { buildSession, readTranscript, turnsFromMessages } from './src/session.ts'
+import { readTrusted, resolveBinary, settingsFrom } from './src/settings.ts'
 
 export const description =
 	"Rates how risky the thread's code changes are (Low, Medium, High) with brisk. Labels the thread, adds a review quick action, and notes Medium and High risk in the Ship prompt."
 
-/**
- * Settings, read from Amp's configuration. Set them in workspace (project)
- * settings to apply to one project only.
- *
- * - brisk.binary: path to the brisk binary. Default: `brisk` on PATH.
- * - brisk.backend: `auto` (default: OpenRouter when OPENROUTER_API_KEY is set,
- *   else Amp's Jev), `amp`, `openrouter`, or `rules-only`.
- * - brisk.base: base ref to compare against. Default: brisk's own choice.
- * - brisk.confirmShipOnHigh: ask a person to confirm before Ship or Push to
- *   Branch runs on a High-risk change. Default false.
- */
-interface Settings {
-	bin: string
-	mode: Mode
-	base?: string
-	confirmShipOnHigh: boolean
-}
-
-async function settings(amp: PluginAPI): Promise<Settings> {
-	const c = await amp.configuration.get()
-	const str = (k: string) => (typeof c[k] === 'string' && c[k] ? (c[k] as string) : undefined)
-	const backend = str('brisk.backend') ?? 'auto'
-	const mode: Mode =
-		backend === 'rules-only'
-			? 'rules-only'
-			: backend === 'openrouter'
-				? 'binary'
-				: backend === 'amp'
-					? 'amp'
-					: process.env.OPENROUTER_API_KEY
-						? 'binary'
-						: 'amp'
-	return {
-		bin: str('brisk.binary') ?? 'brisk',
-		mode,
-		base: str('brisk.base'),
-		confirmShipOnHigh: c['brisk.confirmShipOnHigh'] === true,
-	}
-}
+/** A run's result, or why it failed. */
+type Outcome = RunResult | { error: string }
 
 interface ThreadState {
 	/** Latest result; undefined when the changes may have moved on since. */
 	result?: RunResult
 	action?: QuickAction
 	/** The run in progress. */
-	running?: Promise<RunResult | undefined>
+	running?: Promise<Outcome | undefined>
 	/** A run queued behind `running`; it will see every change made so far. */
-	pending?: Promise<RunResult | undefined>
+	pending?: Promise<Outcome | undefined>
+	/** Bumped when files may have changed outside a run, so an older run does not save its result. */
+	epoch: number
 }
 
 export default function (amp: PluginAPI) {
 	const threads = new Map<string, ThreadState>()
 	const state = (id: string) => {
 		let s = threads.get(id)
-		if (!s) threads.set(id, (s = {}))
+		if (!s) threads.set(id, (s = { epoch: 0 }))
 		return s
 	}
 	const root = amp.system.workspaceRoot ? amp.helpers.filePathFromURI(amp.system.workspaceRoot) : null
+	const settings = async () => settingsFrom(await readTrusted(), root ?? '')
 
 	async function run(
 		thread: PluginThread,
 		decide: Decide,
 		log: (...a: unknown[]) => void,
-	): Promise<RunResult | undefined> {
+	): Promise<Outcome | undefined> {
 		if (!root) return undefined
 		const s = state(thread.id)
 		// Every caller gets a run that started after it asked, so no result
 		// predates the changes it is about. Callers that arrive while a run
 		// is queued share that queued run.
 		if (s.pending) return s.pending
-		const p: Promise<RunResult | undefined> = (s.running ?? Promise.resolve()).then(async () => {
+		const p: Promise<Outcome | undefined> = (s.running ?? Promise.resolve()).catch(() => {}).then(async () => {
 			s.pending = undefined
 			s.running = p
+			const epoch = s.epoch
 			try {
-				const cfg = await settings(amp)
+				const cfg = await settings()
 				const messages = await readTranscript(thread)
 				const session = buildSession(
 					thread.id,
 					turnsFromMessages(messages, amp.helpers, root),
 					await thread.title.get(),
 				)
-				const result = await assess({ bin: cfg.bin, cwd: root, mode: cfg.mode, base: cfg.base, session, decide })
-				s.result = result
-				await show(thread, s, result)
+				const bin = await resolveBinary(cfg.bin, root)
+				const result = await assess({ bin, cwd: root, mode: cfg.mode, base: cfg.base, session, decide })
+				if (s.epoch === epoch) s.result = result
+				await show(thread, s, result).catch((e) => log(`brisk: could not show the result: ${e instanceof Error ? e.message : String(e)}`))
 				log(`brisk: ${summary(result.assessment, result.degraded)}`)
 				return result
 			} catch (e) {
+				const error = e instanceof Error ? e.message : String(e)
 				s.result = undefined
-				log(`brisk: assessment failed: ${e instanceof Error ? e.message : String(e)}`)
-				return undefined
+				log(`brisk: assessment failed: ${error}`)
+				// An earlier label and review action describe changes that have
+				// moved on; replace them rather than leave a stale Low.
+				s.action?.unsubscribe()
+				s.action = undefined
+				await thread
+					.labels()
+					.then((l) => thread.setLabels(labelsFor(l, 'unknown')))
+					.catch(() => {})
+				return { error }
 			} finally {
 				if (s.running === p) s.running = undefined
 			}
@@ -133,7 +113,10 @@ export default function (amp: PluginAPI) {
 			.some(({ call }) => amp.helpers.filesModifiedByToolCall(call)?.length || amp.helpers.shellCommandFromToolCall(call))
 		if (event.status !== 'done') {
 			// The turn may have changed files; reassess before the next Ship.
-			if (touched) s.result = undefined
+			if (touched) {
+				s.result = undefined
+				s.epoch++
+			}
 			return
 		}
 		if (!touched && s.result) return
@@ -146,19 +129,20 @@ export default function (amp: PluginAPI) {
 		const r = inFlight
 			? await inFlight
 			: (s.result ?? (await run(ctx.thread, (req) => ctx.ai.decide(req as Parameters<typeof ctx.ai.decide>[0]), ctx.logger.log)))
-		const line = r && shipLine(r.assessment, r.degraded)
+		if (!r) return undefined
+		const line = 'error' in r ? unknownLine(r.error) : shipLine(r.assessment, r.degraded)
 		return line ? { append: line } : undefined
 	})
 
 	amp.on('agent.start', async (event, ctx) => {
 		if (!event.changesWorkflow) return {}
-		const cfg = await settings(amp)
-		if (!cfg.confirmShipOnHigh) return {}
+		const cfg = await settings()
+		if (!cfg.confirmShip) return {}
 		const r = await run(ctx.thread, (req) => ctx.ai.decide(req as Parameters<typeof ctx.ai.decide>[0]), ctx.logger.log)
-		if (r?.assessment.tier !== 'high') return {}
+		const ask = r && shipGate(true, r)
+		if (!ask) return {}
 		const ok = await ctx.ui.confirm({
-			title: 'Ship a High-risk change?',
-			message: `${summary(r.assessment, r.degraded)}\n\nThis project asks a person to confirm before shipping High-risk changes.`,
+			...ask,
 			confirmButtonText: 'Ship anyway',
 			requireHuman: true,
 		})
@@ -176,7 +160,7 @@ export default function (amp: PluginAPI) {
 			}
 			const thread = ctx.thread
 			const r = await run(thread, (req) => ctx.ai.decide({ ...(req as Parameters<typeof ctx.ai.decide>[0]), threadID: thread.id }), amp.logger.log)
-			await ctx.ui.notify(r ? summary(r.assessment, r.degraded) : 'brisk: assessment failed; see the plugin log.')
+			await ctx.ui.notify(!r ? 'brisk: no workspace to assess.' : 'error' in r ? `brisk: assessment failed: ${r.error}` : summary(r.assessment, r.degraded))
 		},
 	)
 

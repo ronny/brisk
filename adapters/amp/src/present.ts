@@ -1,13 +1,16 @@
 // Text and labels the plugin shows for an assessment. Pure functions.
 
-import type { Assessment, Evidence, Tier } from './brisk.ts'
+import type { Assessment, Evidence, RunResult, Tier } from './brisk.ts'
 
 export const LABEL_PREFIX = 'risk-'
 
 const TITLE: Record<Tier, string> = { low: 'Low', medium: 'Medium', high: 'High' }
 
-/** labelsFor replaces any earlier risk label with the one for tier. */
-export function labelsFor(existing: string[], tier: Tier): string[] {
+/**
+ * labelsFor replaces any earlier risk label with the one for tier, or with
+ * risk-unknown when the assessment failed.
+ */
+export function labelsFor(existing: string[], tier: Tier | 'unknown'): string[] {
 	return [...existing.filter((l) => !l.startsWith(LABEL_PREFIX)), LABEL_PREFIX + tier]
 }
 
@@ -46,6 +49,24 @@ export function shipLine(a: Assessment, degraded?: string): string | undefined {
 			? 'Before pushing, review the changes behind these reasons, fix anything wrong, and tell me what you checked.'
 			: 'Before pushing, check the changes behind these reasons.'
 	return `${summary(a, degraded)} ${ask}`
+}
+
+/** unknownLine is appended to the Ship prompt when brisk could not assess the changes. */
+export function unknownLine(error: string): string {
+	return `Risk: unknown (brisk could not assess these changes: ${error}). Before pushing, review the changes yourself and tell me what you checked.`
+}
+
+/**
+ * shipGate decides what happens before Ship or Push to Branch when the
+ * project asks for confirmation: High and unassessed changes both need a
+ * person. r is the assessment, or an error message when it failed.
+ */
+export function shipGate(confirmShip: boolean, r: RunResult | { error: string }): { title: string; message: string } | undefined {
+	if (!confirmShip) return undefined
+	const note = 'This project asks a person to confirm before shipping High-risk or unassessed changes.'
+	if ('error' in r) return { title: 'Ship an unassessed change?', message: `brisk could not assess these changes: ${r.error}\n\n${note}` }
+	if (r.assessment.tier !== 'high') return undefined
+	return { title: 'Ship a High-risk change?', message: `${summary(r.assessment, r.degraded)}\n\n${note}` }
 }
 
 /** reviewMessage is what the "Review risky changes" quick action sends. */
