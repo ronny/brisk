@@ -13,6 +13,9 @@ brisk assess [--repo DIR] [--base REF] [--head REF] [--session session.json] \
 - `--base` defaults to the merge base with `origin/HEAD`, else `main`, else `master`.
 - Without `--head`, brisk assesses the working tree, including untracked files (it never changes the real index).
 - Git reads no attributes from the repository's `.gitattributes` files, so a change cannot hide code by marking it binary or run a clean filter. Only `$GIT_DIR/info/attributes` applies.
+- In the working tree, untracked code files that only a `.gitignore` line added by the change ignores are assessed anyway and flagged (`gitignore_hides_code`).
+- A new file is analysed even when its name looks generated (`*_gen.go`, `*.pb.go`); only files that already had such a name, and lockfiles, are skipped.
+- Trust boundary: brisk treats everything in the working tree and the assessed commits as written by the agent, and trusts `.git/` (config, hooks, `info/attributes`, `info/exclude`). An agent that can write to `.git/` can change how git reads the repository; brisk does not defend against that.
 - Before anything goes to a model, brisk replaces values that look like secrets with `[redacted secret]` and leaves out private key bodies and credential files such as `.env`.
 - `--backend auto` (the default) uses OpenRouter when `OPENROUTER_API_KEY` is set and rules only otherwise. `BRISK_MODEL` overrides the model (default `typesafe/jev-1.14`).
 - If the model backend fails, brisk falls back to rules only and says so in `provenance.degraded`.
