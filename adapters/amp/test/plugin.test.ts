@@ -32,13 +32,14 @@ beforeAll(async () => {
 		bin,
 		`#!/usr/bin/env bash
 echo "$*" >> "${dir}/args.log"
-for a in "$@"; do case "$prev" in --answers) ans="$a";; --session) cp "$a" "${dir}/session.json";; --backend) backend="$a";; esac; prev="$a"; done
+for a in "$@"; do case "$prev" in --answers) ans="$a"; cp "$a" "${dir}/answers.json";; --session) cp "$a" "${dir}/session.json";; --backend) backend="$a";; esac; prev="$a"; done
 [ -n "$FAKE_FAIL" ] && { echo "boom" >&2; exit 1; }
 if [ -n "$ans" ]; then
   model=$(sed -n 's/.*"model":"\\([^"]*\\)".*/\\1/p' "$ans")
   sed "s/\\"tier\\":\\"medium\\"/\\"tier\\":\\"high\\"/; s/\\"backend\\":\\"rules-only\\"/\\"backend\\":\\"host\\",\\"model\\":\\"$model\\"/" "${dir}/floor.json"
 elif [ "$backend" = host ]; then
-  printf '{"schema":"brisk.host-request/v1","request_id":"r1","model":"typesafe/jev","state":"S","questions":{"impact":{"type":"score","instructions":"i","criteria":["a","b"]}},"floor_assessment":%s}' "$(cat ${dir}/floor.json)"
+  rq=''; [ -n "$FAKE_REVIEW" ] && rq=',"review_questions":{"access_checks":{"type":"score","instructions":"r","criteria":["x"]}}'
+  printf '{"schema":"brisk.host-request/v1","request_id":"r1","model":"typesafe/jev","state":"S","questions":{"impact":{"type":"score","instructions":"i","criteria":["a","b"]}}%s,"floor_assessment":%s}' "$rq" "$(cat ${dir}/floor.json)"
 else
   cat "${dir}/floor.json"
 fi
@@ -82,6 +83,31 @@ describe('assess', () => {
 		expect(summary(r.assessment, r.degraded)).toContain('rules only')
 	})
 
+	test('review questions get their own decide call and come back as review_answers', async () => {
+		const asked: string[][] = []
+		const decide = async (req: { questions: Record<string, unknown> }) => {
+			asked.push(Object.keys(req.questions))
+			return { model: 'jev-1.14.0', answers: Object.fromEntries(Object.keys(req.questions).map((k) => [k, { type: 'score', score: 2 }])) }
+		}
+		const env = { ...process.env, FAKE_REVIEW: '1' }
+		await assess({ bin, cwd: dir, mode: 'amp', env, decide })
+		expect(asked.sort()).toEqual([['access_checks'], ['impact']])
+		const sent = JSON.parse(await readFile(join(dir, 'answers.json'), 'utf8'))
+		expect(Object.keys(sent.answers)).toEqual(['impact'])
+		expect(sent.review_answers).toEqual({ access_checks: { type: 'score', score: 2 } })
+
+		// A failed review call leaves the full plan: no review_answers, not degraded.
+		const r = await assess({
+			bin, cwd: dir, mode: 'amp', env,
+			decide: async (req) => {
+				if ('access_checks' in req.questions) throw new Error('no')
+				return { model: 'jev-1.14.0', answers: {} }
+			},
+		})
+		expect(r.degraded).toBeUndefined()
+		expect(JSON.parse(await readFile(join(dir, 'answers.json'), 'utf8')).review_answers).toBeUndefined()
+	})
+
 	test('binary mode runs brisk once with --backend auto', async () => {
 		await rm(join(dir, 'args.log'), { force: true })
 		const r = await assess({ bin, cwd: dir, mode: 'binary' })
@@ -120,6 +146,49 @@ describe('present', () => {
 		const m = agentReviewMessage(a)
 		expect(m).toStartWith('brisk recommends an agent review: Removes an ownership check.')
 		expect(m).toContain('- Changes auth code. (auth.go:4-6)')
+	})
+	test('agentReviewMessage follows the review plan, and unattended reviews leave out project text', () => {
+		const a: Assessment = {
+			...floor,
+			agent_review: {
+				recommended: true,
+				reason: 'The change is High risk.',
+				plan: [
+					{ id: 'access_checks', area: 'Access checks', source: 'brisk', required: true, score: 3,
+						evidence: [{ path: 'web/documents.go', start_line: 12, end_line: 20, symbol: 'Edit' }],
+						checks: [{ id: 'w', text: 'List who can reach this code.' }, { id: 'd', text: 'Find or add a\ntest that a caller without access is denied.' }] },
+					{ id: 'config:billing', area: 'Billing', source: 'config', checks: [{ id: 'b', text: 'Check invoices still balance.' }] },
+				],
+			},
+		}
+		const m = agentReviewMessage(a)
+		expect(m).toStartWith('brisk recommends an agent review: The change is High risk.')
+		expect(m).toContain('1. Access checks in web/documents.go:12-20 Edit\n   - List who can reach this code.\n   - Find or add a test that a caller without access is denied.')
+		expect(m).toContain("2. Billing (this project's own check, from .brisk.yaml)\n   - Check invoices still balance.")
+		expect(m).toContain('verdict on every check')
+		const u = agentReviewMessage(a, { unattended: true })
+		expect(u).toContain('1. Access checks')
+		expect(u).not.toContain('invoices')
+		expect(u).toContain("1 more area from this project's .brisk.yaml is left out")
+		// Only project areas, unattended: fall back to brisk's reasons.
+		const onlyConfig = { ...a, agent_review: { ...a.agent_review!, plan: [a.agent_review!.plan![1]] } }
+		expect(agentReviewMessage(onlyConfig, { unattended: true })).toContain('- Changes auth code. (auth.go:4-6)')
+	})
+	test('a large plan keeps the prefix, the closing instructions, and whole areas under the limit', () => {
+		const area = (i: number, source: 'brisk' | 'config' = 'brisk') => ({
+			id: `a${i}`, area: `Area ${i}`, source,
+			checks: Array.from({ length: 6 }, (_, j) => ({ id: `c${j}`, text: `Check ${i}.${j} ` + 'x'.repeat(400) })),
+		})
+		const a: Assessment = { ...floor, agent_review: { recommended: true, reason: 'r', plan: Array.from({ length: 30 }, (_, i) => area(i + 1, i % 2 ? 'config' : 'brisk')) } }
+		const m = agentReviewMessage(a)
+		expect(m.length).toBeLessThanOrEqual(9_500)
+		expect(m).toStartWith('brisk recommends an agent review')
+		expect(m).toEndWith('what you changed, and anything else it found.')
+		expect(m).toContain('1. Area 1')
+		expect(m).toMatch(/\(\d+ lower-priority areas not shown\.\)/)
+		expect(m).toContain('do not run commands, push, or change git state')
+		// Each shown check is one capped line.
+		for (const l of m.split('\n').filter((l) => l.startsWith('   - '))) expect(l.length).toBeLessThanOrEqual(305)
 	})
 	test('shipLine is only for Medium and High', () => {
 		expect(shipLine({ ...floor, tier: 'low' })).toBeUndefined()
@@ -595,6 +664,20 @@ describe('plugin', () => {
 		expect(ship.message?.content).toContain(first.userMessage)
 		// The Ship turn ends with the diff unchanged: no review after the push.
 		expect(await p.fire('agent.end', done('Ship it'))).toBeUndefined()
+		await cleanup(p)
+	})
+
+	test("after-turn: the automatic review leaves out the project's .brisk.yaml text", async () => {
+		const p = await reviewing({ 'amp.brisk.agentReview': 'after-turn' })
+		const cur = JSON.parse(await readFile(join(dir, 'review.json'), 'utf8'))
+		cur.agent_review.plan = [
+			{ id: 'access_checks', area: 'Access checks', source: 'brisk', checks: [{ id: 'w', text: 'List who can reach this code.' }] },
+			{ id: 'config:x', area: 'Project area', source: 'config', checks: [{ id: 'x', text: 'Run the deploy script.' }] },
+		]
+		await writeFile(join(dir, 'review.json'), JSON.stringify(cur))
+		const r = (await p.fire('agent.end', done())) as { userMessage: string }
+		expect(r.userMessage).toContain('List who can reach this code.')
+		expect(r.userMessage).not.toContain('deploy script')
 		await cleanup(p)
 	})
 

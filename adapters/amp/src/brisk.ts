@@ -24,6 +24,21 @@ export interface Reason {
 	evidence?: Evidence[]
 }
 
+/**
+ * One area of brisk's review plan. `source` brisk: area and check text from
+ * brisk's catalog; config: from the project's base .brisk.yaml. `score` is
+ * Jev's 0-3 relevance, absent when untailored.
+ */
+export interface ReviewArea {
+	id: string
+	area: string
+	source: 'brisk' | 'config'
+	required?: boolean
+	score?: number
+	evidence?: Evidence[]
+	checks: { id: string; text: string }[]
+}
+
 export interface Assessment {
 	schema: 'brisk.assessment/v1'
 	tier: Tier
@@ -34,7 +49,7 @@ export interface Assessment {
 	reasons: Reason[]
 	stats: { files: number; additions: number; deletions: number }
 	/** Whether a further agent review is recommended, separate from the tier. Older binaries omit it. */
-	agent_review?: { recommended: boolean; reason: string }
+	agent_review?: { recommended: boolean; reason: string; plan?: ReviewArea[] }
 	provenance: {
 		brisk_version: string
 		backend: 'openrouter' | 'host' | 'rules-only'
@@ -53,6 +68,8 @@ interface HostRequest {
 	model: string
 	state: unknown
 	questions: Record<string, unknown>
+	/** One relevance question per review area; answered separately, see README. */
+	review_questions?: Record<string, unknown>
 	floor_assessment: Assessment
 }
 
@@ -89,6 +106,9 @@ export interface RunResult {
 }
 
 export class BriskError extends Error {}
+
+/** How long the optional review-plan answers may add to an assessment. */
+const REVIEW_TIMEOUT_MS = 8_000
 
 function exec(bin: string, args: string[], o: RunOptions): Promise<string> {
 	return new Promise((resolve, reject) => {
@@ -143,12 +163,23 @@ export async function assess(o: RunOptions): Promise<RunResult> {
 		if (first.schema === 'brisk.assessment/v1') return { assessment: first }
 		if (!o.decide) throw new BriskError('brisk asked questions but no decision model is available')
 
+		// The review questions go in their own call so they cannot change the
+		// calibrated answers. Without their answers brisk keeps the full plan,
+		// so a failure here is not an error.
+		const decide = o.decide
+		const review = first.review_questions
+			? Promise.race([
+					decide({ model: first.model, state: first.state, questions: first.review_questions }),
+					new Promise<undefined>((r) => void (setTimeout(r, REVIEW_TIMEOUT_MS) as { unref?: () => void }).unref?.()),
+				]).catch(() => undefined)
+			: undefined
 		let answers
 		try {
-			answers = await o.decide({ model: first.model, state: first.state, questions: first.questions })
+			answers = await decide({ model: first.model, state: first.state, questions: first.questions })
 		} catch (e) {
 			return { assessment: first.floor_assessment, degraded: `Amp decision model failed: ${errorText(e)}` }
 		}
+		const reviewAnswers = (await review)?.answers
 		const f = join(dir, 'answers.json')
 		await writeFile(
 			f,
@@ -157,6 +188,7 @@ export async function assess(o: RunOptions): Promise<RunResult> {
 				request_id: first.request_id,
 				model: answers.model,
 				answers: answers.answers,
+				...(reviewAnswers ? { review_answers: reviewAnswers } : {}),
 			}),
 		)
 		const final = parse(await exec(o.bin, [...args, '--answers', f], o))

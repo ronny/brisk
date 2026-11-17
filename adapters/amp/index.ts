@@ -169,7 +169,7 @@ export default function (amp: PluginAPI) {
 		// Marked done when the review turn starts (agent.start), in case Amp
 		// does not run this continuation.
 		s.reviewRequested = a.provenance.diff_hash
-		return { action: 'continue' as const, userMessage: agentReviewMessage(a), maxContinuations: 1 }
+		return { action: 'continue' as const, userMessage: agentReviewMessage(a, { unattended: true }), maxContinuations: 1 }
 	})
 
 	amp.on('changes.prompt', async (event, ctx) => {
