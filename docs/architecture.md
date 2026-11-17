@@ -10,8 +10,8 @@ The overview shows the main components. Implementation details and the separate 
 
 ## Scope and status
 
-This snapshot covers `main` at [`7b5b29d`](https://github.com/ronny/brisk/commit/7b5b29d) and the active work described below.
-The overview shows MVP components. `[WIP]` marks an active extension, not a claim that the published binary supports it.
+This snapshot includes the completed policy and review implementation on the [core thread's local `main`](https://ampcode.com/threads/T-01a1e74a-81c7-76ef-8fa3-ac7baacb2a0f) at `57f0b57`.
+That implementation was not yet pushed when this snapshot was prepared. The overview shows the implemented MVP shape.
 Additional implementations are interface-only. The input box identifies untrusted evidence.
 
 | Part | MVP implementation | Extension boundary |
@@ -32,6 +32,7 @@ The core runs without a harness or session record.
    Session facts describe reported verification. They do not prove that a change is correct.
 2. **Policy normally comes from the base commit.** The default context provider reads `.brisk.yaml` from the resolved base.
    The candidate cannot loosen its own policy. An explicit `--config` is a trusted operator override.
+   Trusted base policy can raise or lower rule tiers before the engine computes the floor.
    CODEOWNERS supplies owner evidence from the working tree, not trusted scoring policy.
 3. **Language analysis receives bytes, not repository authority.** The engine supplies old/new contents and hunks.
    Embedded tree-sitter WASM runs on wazero without a mounted repository filesystem or inherited environment.
@@ -40,12 +41,12 @@ The core runs without a harness or session record.
    Final tier = max(rule floor, calibrated model tier). No model or a failed model call leaves the rules-only result.
    A failure appears in `provenance.degraded`. Collection errors remain errors, not Low assessments.
 5. **Model calls cross an egress boundary.** The core sends a budgeted state and typed questions, not repository access.
-   Active security work redacts secrets before clipping and omits credential contents.
+   Brisk redacts detected secrets before clipping and omits credential contents.
    This reduces exposure. It does not guarantee that every secret format is detected.
 
-The active security work also hardens Git collection against candidate attributes and newly hidden files.
+Git collection ignores candidate attributes and detects newly hidden files.
 It binds host answers to the complete diff and base, beyond the clipped model state.
-The Amp adapter work restricts binary selection and control policy to trusted user or managed config.
+The Amp adapter restricts binary selection and control policy to trusted user or managed config.
 The adapter does not execute an assessor chosen by the candidate repository.
 
 ### Host route
@@ -59,16 +60,33 @@ The adapter does not execute an assessor chosen by the candidate repository.
 An empty change can return an assessment directly. The harness can show `floor_assessment` when model answering fails.
 The direct route calls Jev through OpenRouter. The rules-only route makes no model call.
 
-### Active policy and review extension
+### Policy and agent review
 
-The agreed extension adds named presets: `reviewed`, `autonomous`, and `strict`.
-Base-commit `.brisk.yaml` will control thresholds or a flag budget, override thresholds, tier actions, and agent-review policy.
-Calibration remains specific to the answering model version.
-Preset defaults and exact config keys are not final in this snapshot.
+Base-commit `.brisk.yaml` controls policy. Its optional keys are:
 
-The assessment extension adds `agent_review: { recommended, reason }` next to the tier, plus preset provenance.
-The recommendation is independent of the tier: Medium can also warrant an agent review.
-It recommends review. It does not perform review or prove approval.
+- `preset`: `autonomous`, `reviewed` (default), or `strict`.
+- `sensitive_paths`: project-specific path rules and their minimum tiers.
+- `high_share`, `medium_share`: target model-only shares at High and Medium-or-above, using calibration risk quantiles.
+- `thresholds`: explicit model-risk thresholds. These take precedence over shares.
+- `overrides`: answer thresholds that raise the model tier. These replace the calibration overrides.
+- `rule_tiers`: rule-specific tiers, applied before the engine computes the rule floor.
+- `actions`: action text for each tier.
+- `agent_review`: independent review conditions, with `min_tier`, `min_uncertainty`, `questions`, and `rules`.
+
+Calibration remains specific to the answering model version. Rule floors and overrides can exceed the requested model-only shares.
+Review conditions are ORed. They use existing answers and rule hits, without another model call.
+
+Every assessment includes `agent_review: { recommended, reason }`, including the host request's `floor_assessment`.
+The recommendation is independent of the tier: Low or Medium can also warrant an agent review.
+The recommendation does not perform review or prove approval.
+
+Policy provenance includes:
+
+- `provenance.preset`: the effective preset, including the default `reviewed`.
+- `provenance.thresholds`: the effective model thresholds, when model scoring occurs.
+- `provenance.policy_note`: an explanation when policy cannot apply fully, such as missing calibration quantiles for shares.
+
+A `policy_note` does not mean rules-only fallback. Backend failure remains separate in `provenance.degraded`.
 Trusted adapter policy controls review automation and optional human-only Ship confirmation.
 The Amp integration is advisory, not a universal gate on arbitrary `git push` commands.
 
@@ -87,7 +105,7 @@ A changed model request requires a new recording. Tests fail rather than silentl
 The manual refresh workflow uploads recordings as an artifact. It does not commit them or deploy anything.
 Historical answer files and committed fixture recordings serve different datasets.
 
-The security extension separates the model-input recording key from the host protocol request ID.
+The model-input recording key differs from the host protocol request ID.
 The former identifies identical state and questions. The latter also binds answers to the base and complete diff.
 This preserves replay reuse without accepting stale host answers for another change.
 
@@ -95,7 +113,7 @@ This preserves replay reuse without accepting stale host answers for another cha
 
 - [MVP plan](https://ampcode.com/artifacts/brisk-mvp-plan-c8e16b14-f500-4c57-bf59-aa5ec413f034), including policy and review decisions.
 - [Investigation, section 7](https://ampcode.com/artifacts/change-risk-classifier-for-amp-investigation-and-recommendat-02dccd43-748e-4312-ac01-3b3e4c023639), the agreed harness-independent architecture.
-- [Core and security work](https://ampcode.com/threads/T-01a1e74a-81c7-76ef-8fa3-ac7baacb2a0f), including active policy and review extensions.
+- [Core and security work](https://ampcode.com/threads/T-01a1e74a-81c7-76ef-8fa3-ac7baacb2a0f), including completed policy and review behavior.
 - [Language and Amp work](https://ampcode.com/threads/T-01a1e74a-b070-7213-b403-0a3894c8bc0b), including parser isolation and trusted adapter policy.
 - Implementation: [`cmd/brisk/`](../cmd/brisk/main.go), [`context/gitctx/`](../context/gitctx/gitctx.go), [`lang/`](../lang/), [`backend/`](../backend/), and [`schema/`](../schema/).
 - Evaluation: [`cmd/brisk-eval/`](../cmd/brisk-eval/main.go), [`eval/fixtures_test.go`](../eval/fixtures_test.go), and [GitHub workflows](../.github/workflows/).

@@ -37,8 +37,8 @@
 <text x="878" y="324" font-size="16" fill="#17243b" font-weight="600" text-anchor="start">Assessment</text>
 <text x="878" y="352" font-size="13" fill="#526078" font-weight="400" text-anchor="start">Low / Medium / High</text>
 <text x="878" y="374" font-size="13" fill="#526078" font-weight="400" text-anchor="start">Reasons, evidence and next action</text>
-<text x="878" y="396" font-size="13" fill="#526078" font-weight="400" text-anchor="start">[WIP] Agent review recommended</text>
-<text x="878" y="418" font-size="13" fill="#526078" font-weight="400" text-anchor="start">Shown in the harness or CLI</text>
+<text x="878" y="396" font-size="13" fill="#526078" font-weight="400" text-anchor="start">Agent review: recommendation + reason</text>
+<text x="878" y="418" font-size="13" fill="#526078" font-weight="400" text-anchor="start">Provenance records the applied policy</text>
 <polyline points="600,220 600,295" fill="none" stroke="#526078" stroke-width="1.2" marker-end="url(#arrow)"/>
 <g paint-order="stroke" stroke="white" stroke-width="5">
 <text x="700" y="263" font-size="12" fill="#526078" font-weight="400" text-anchor="middle">calls CLI + supplies session</text>
@@ -60,7 +60,7 @@
 <text x="453" y="584" font-size="16" fill="#17243b" font-weight="600" text-anchor="start">Project context + policy</text>
 <text x="453" y="612" font-size="13" fill="#526078" font-weight="400" text-anchor="start">Git history and sensitive paths</text>
 <text x="453" y="634" font-size="13" fill="#526078" font-weight="400" text-anchor="start">Config from the base commit</text>
-<text x="453" y="656" font-size="13" fill="#526078" font-weight="400" text-anchor="start">[WIP] Named policy presets</text>
+<text x="453" y="656" font-size="13" fill="#526078" font-weight="400" text-anchor="start">Presets: autonomous / reviewed / strict</text>
 <rect x="830" y="555" width="330" height="120" rx="8" fill="white" stroke="#aab5c5" stroke-width="1"/>
 <text x="848" y="584" font-size="16" fill="#17243b" font-weight="600" text-anchor="start">Classifier backends</text>
 <text x="848" y="612" font-size="13" fill="#526078" font-weight="400" text-anchor="start">Jev through OpenRouter</text>
@@ -78,5 +78,5 @@
 <g paint-order="stroke" stroke="white" stroke-width="5">
 <text x="911" y="485" font-size="12" fill="#526078" font-weight="400" text-anchor="middle">answers</text>
 </g>
-<text x="40" y="715" font-size="12" fill="#526078" font-weight="400" text-anchor="start">MVP components shown · Additional implementations are interface-only · [WIP] = active extension</text>
+<text x="40" y="715" font-size="12" fill="#526078" font-weight="400" text-anchor="start">MVP components shown · reviewed is the default preset · Additional implementations are interface-only</text>
 </g></svg>

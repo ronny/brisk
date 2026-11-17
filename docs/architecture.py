@@ -93,8 +93,8 @@ def runtime():
     d.box(860, 295, 300, 145, "Assessment", [
         "Low / Medium / High",
         "Reasons, evidence and next action",
-        "[WIP] Agent review recommended",
-        "Shown in the harness or CLI"], blue=True)
+        "Agent review: recommendation + reason",
+        "Provenance records the applied policy"], blue=True)
 
     d.edge("600,220 600,295", "calls CLI + supplies session", (700, 263))
     d.edge("340,365 400,365", "input", (370, 352))
@@ -107,7 +107,7 @@ def runtime():
     d.box(435, 555, 330, 120, "Project context + policy", [
         "Git history and sensitive paths",
         "Config from the base commit",
-        "[WIP] Named policy presets"])
+        "Presets: autonomous / reviewed / strict"])
     d.box(830, 555, 330, 120, "Classifier backends", [
         "Jev through OpenRouter",
         "Host: harness answers the questions",
@@ -115,7 +115,7 @@ def runtime():
     d.edge("205,555 205,495 480,495 480,440", "findings", (298, 485))
     d.edge("600,555 600,440", "context", (634, 522))
     d.edge("995,555 995,495 720,495 720,440", "answers", (911, 485))
-    d.text(40, 715, "MVP components shown · Additional implementations are interface-only · [WIP] = active extension", 12, MUTED)
+    d.text(40, 715, "MVP components shown · reviewed is the default preset · Additional implementations are interface-only", 12, MUTED)
     d.save("architecture.svg")
 
 
@@ -151,7 +151,7 @@ def evaluation():
         "Match request key to recorded answers",
         "Missing fixture recording fails the test",
         "No API key, network call or model cost",
-        "[WIP] key distinct from host protocol ID"], blue=True)
+        "Key distinct from host protocol ID"], blue=True)
     d.edge("400,440 400,480 205,480 205,520", "new / changed requests", (258, 468), dashed=True)
     d.edge("370,595 435,595", "save", (401, 583), dashed=True)
     d.edge("765,595 830,595", "load", (797, 583), blue=True)
@@ -170,7 +170,7 @@ def evaluation():
         "Amp plugin tests + TypeScript check"], blue=True)
     d.box(830, 905, 330, 95, "Offline evaluation report", [
         "Held-out metrics + baselines, stability,",
-        "latency, cost · [WIP] per-preset results"])
+        "latency, cost and per-preset results"])
     d.edge("600,847 600,905", "assertions", (648, 885), blue=True)
     d.edge("995,847 995,905", "scores + labels", (1074, 885))
     d.edge("830,957 800,957 800,1047 205,1047 205,847", "fit feedback from training split only", (464, 1038), dashed=True)

@@ -57,7 +57,7 @@
 <text x="848" y="577" font-size="13" fill="#526078" font-weight="400" text-anchor="start">Match request key to recorded answers</text>
 <text x="848" y="599" font-size="13" fill="#526078" font-weight="400" text-anchor="start">Missing fixture recording fails the test</text>
 <text x="848" y="621" font-size="13" fill="#526078" font-weight="400" text-anchor="start">No API key, network call or model cost</text>
-<text x="848" y="643" font-size="13" fill="#526078" font-weight="400" text-anchor="start">[WIP] key distinct from host protocol ID</text>
+<text x="848" y="643" font-size="13" fill="#526078" font-weight="400" text-anchor="start">Key distinct from host protocol ID</text>
 <polyline points="400,440 400,480 205,480 205,520" fill="none" stroke="#526078" stroke-width="1.2" marker-end="url(#arrow)" stroke-dasharray="6 5"/>
 <g paint-order="stroke" stroke="white" stroke-width="5">
 <text x="258" y="468" font-size="12" fill="#526078" font-weight="400" text-anchor="middle">new / changed requests</text>
@@ -97,7 +97,7 @@
 <rect x="830" y="905" width="330" height="95" rx="8" fill="white" stroke="#aab5c5" stroke-width="1"/>
 <text x="848" y="934" font-size="16" fill="#17243b" font-weight="600" text-anchor="start">Offline evaluation report</text>
 <text x="848" y="962" font-size="13" fill="#526078" font-weight="400" text-anchor="start">Held-out metrics + baselines, stability,</text>
-<text x="848" y="984" font-size="13" fill="#526078" font-weight="400" text-anchor="start">latency, cost · [WIP] per-preset results</text>
+<text x="848" y="984" font-size="13" fill="#526078" font-weight="400" text-anchor="start">latency, cost and per-preset results</text>
 <polyline points="600,847 600,905" fill="none" stroke="#245bcb" stroke-width="1.7" marker-end="url(#blue-arrow)"/>
 <g paint-order="stroke" stroke="white" stroke-width="5">
 <text x="648" y="885" font-size="12" fill="#245bcb" font-weight="400" text-anchor="middle">assertions</text>
