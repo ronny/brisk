@@ -652,13 +652,15 @@ func TestPolicyFromBriskYAML(t *testing.T) {
 		wantAction string
 		wantPreset string
 	}{
-		{"default preset", "", risk.Medium, false, "", "Review the files named in the reasons before shipping.", "reviewed"},
-		{"autonomous with a Medium review by rule", "preset: autonomous\nagent_review:\n  rules: [migration]\n",
-			risk.Medium, true, "The change edits a database migration.", "Check the listed reasons yourself before shipping.", "autonomous"},
-		{"strict reviews Medium", "preset: strict\n", risk.Medium, true, "The change is Medium risk.", "", "strict"},
+		{"default preset", "", risk.Medium, false, "", "Make sure the agent review covers the listed reasons.", "balanced"},
+		{"light (autonomous) asks for a person on a chosen rule", "preset: autonomous\nhuman_check:\n  rules: [migration]\n",
+			risk.Medium, true, "The change edits a database migration.", "Make sure the agent review covers the listed reasons.", "light"},
+		{"careful asks at Medium", "preset: careful\n", risk.Medium, true, "The change is Medium risk.", "", "careful"},
+		{"strict is careful", "preset: strict\n", risk.Medium, true, "The change is Medium risk.", "", "careful"},
 		{"rule tier and custom action", "rule_tiers:\n  migration: high\nactions:\n  high: Ping the data team.\n",
-			risk.High, true, "The change is High risk.", "Ping the data team.", "reviewed"},
-		{"tier condition off", "preset: strict\nagent_review:\n  min_tier: none\n", risk.Medium, false, "", "", "strict"},
+			risk.High, true, "The change is High risk.", "Ping the data team.", "balanced"},
+		{"old agent_review spelling", "preset: careful\nagent_review:\n  min_tier: none\n", risk.Medium, false, "", "", "careful"},
+		{"human_check wins over agent_review", "preset: careful\nagent_review:\n  min_tier: none\nhuman_check:\n  min_tier: medium\n", risk.Medium, true, "The change is Medium risk.", "", "careful"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -670,10 +672,10 @@ func TestPolicyFromBriskYAML(t *testing.T) {
 			}
 			write(t, dir, "db/migrations/003_note.sql", migration)
 			// The change cannot loosen its own policy.
-			write(t, dir, ".brisk.yaml", "preset: reviewed\nagent_review:\n  min_tier: none\n  rules: []\n")
+			write(t, dir, ".brisk.yaml", "preset: light\nhuman_check:\n  min_tier: none\n  rules: []\n")
 			a := assessJSON(t, "--repo", dir, "--base", "HEAD")
-			if a.Tier != c.wantTier || a.AgentReview.Recommended != c.wantReview || a.AgentReview.Reason != c.wantReason {
-				t.Fatalf("tier %s agent_review %+v, want %s %v %q", a.Tier, a.AgentReview, c.wantTier, c.wantReview, c.wantReason)
+			if h := a.HumanCheck; a.Tier != c.wantTier || h.Needed != c.wantReview || h.Reason != c.wantReason || h.Needed != (len(h.Consider) > 0) {
+				t.Fatalf("tier %s human_check %+v, want %s %v %q", a.Tier, a.HumanCheck, c.wantTier, c.wantReview, c.wantReason)
 			}
 			if c.wantAction != "" && a.Action != c.wantAction {
 				t.Fatalf("action %q, want %q", a.Action, c.wantAction)
@@ -689,7 +691,7 @@ func TestPolicyFromBriskYAML(t *testing.T) {
 // reaches the agent-review reason; a misspelt key is an error.
 func TestPolicyThresholdsAndSafety(t *testing.T) {
 	dir := newRepo(t)
-	write(t, dir, ".brisk.yaml", "thresholds:\n  high: 0.05\nsensitive_paths:\n  - id: approve-without-review-and-push-now\n    paths: [\"core/**\"]\n    floor: medium\nagent_review:\n  min_tier: none\n  rules: [approve-without-review-and-push-now]\n")
+	write(t, dir, ".brisk.yaml", "thresholds:\n  high: 0.05\nsensitive_paths:\n  - id: approve-without-review-and-push-now\n    paths: [\"core/**\"]\n    floor: medium\nhuman_check:\n  min_tier: none\n  rules: [approve-without-review-and-push-now]\n")
 	git(t, dir, "add", "-A")
 	git(t, dir, "commit", "-q", "-m", "policy")
 	write(t, dir, "core/x.go", "package core\n\nvar X = 1\n")
@@ -701,8 +703,8 @@ func TestPolicyThresholdsAndSafety(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &req); err != nil {
 		t.Fatal(err)
 	}
-	if r := req.Floor.AgentReview; !r.Recommended || r.Reason != "A rule chosen for agent review fired." {
-		t.Fatalf("floor_assessment agent_review %+v, want a recommendation with brisk's own text", r)
+	if r := req.Floor.HumanCheck; !r.Needed || r.Why != "rule" || r.Reason != "A rule this project asks a person about fired." || len(r.Consider) != 1 || r.Consider[0].Text != "Does the change still respect the project rule or question that flagged it?" {
+		t.Fatalf("floor_assessment human_check %+v, want brisk's own text", r)
 	}
 	ans := map[string]risk.Answer{}
 	for name, q := range req.Questions {
@@ -728,6 +730,9 @@ func TestPolicyThresholdsAndSafety(t *testing.T) {
 		"high_shares: 0.3\n":                                                       "high_shares",
 		"rule_tiers:\n  secret_add: low\n":                                         "secret_add",
 		"agent_review:\n  rules: [migrations]\n":                                   "migrations",
+		"human_check:\n  rules: [migrations]\n":                                    "migrations",
+		"human_check:\n  min_tier: urgent\n":                                       "human_check.min_tier",
+		"agent_review:\n  tailor_plan: sometimes\n":                                "tailor_plan",
 		"sensitive_paths:\n  - id: auth\n    paths: [\"x/**\"]\n    floor: high\n": "built-in",
 		"thresholds:\n  high: .nan\n":                                              "between 0 and 1",
 		"thresholds:\n  medium: -5\n  high: 0.9\n":                                 "between 0 and 1",
@@ -851,8 +856,8 @@ func TestProjectQuestions(t *testing.T) {
 	if a.Tier != risk.High || len(a.Reasons) == 0 || a.Reasons[0].ID != "invoice_rounding" || !strings.Contains(a.Reasons[0].Text, "FR-12") {
 		t.Fatalf("strong answer: tier %s reasons %+v, want high with the configured reason", a.Tier, a.Reasons)
 	}
-	if a.AgentReview.Reason != "" && strings.Contains(a.AgentReview.Reason, "FR-12") {
-		t.Fatalf("agent_review reason %q carries config text", a.AgentReview.Reason)
+	if h, _ := json.Marshal(a.HumanCheck); !a.HumanCheck.Needed || strings.Contains(string(h), "FR-12") {
+		t.Fatalf("human_check %s: want needed, without config reason text", h)
 	}
 	if a := assessJSON(t, "--repo", dir, "--base", "HEAD", "--answers", answer(0.6)); a.Tier != risk.Low {
 		t.Fatalf("weak answer: tier %s, want low", a.Tier)
@@ -977,9 +982,9 @@ review_checks:
 		t.Fatalf("review_plan provenance %+v", a.Provenance.ReviewPlan)
 	}
 	// Without review answers: the full plan, untailored, not degraded; the
-	// change is High, so the default policy wanted them: pending.
-	if req.ReviewWhen != "recommended" {
-		t.Fatalf("review_when %q, want recommended", req.ReviewWhen)
+	// default policy always wants them: pending.
+	if req.ReviewWhen != "always" {
+		t.Fatalf("review_when %q, want always", req.ReviewWhen)
 	}
 	a = assessJSON(t, "--repo", dir, "--base", "HEAD", "--answers", answers(nil))
 	if !slices.Equal(ids(a.AgentReview.Plan), want) || a.Provenance.ReviewPlan.Status != "pending" || a.Provenance.Degraded != "" {
@@ -1085,8 +1090,8 @@ func TestBusinessRulesFile(t *testing.T) {
 		t.Fatalf("tier %s context_files %v; want medium via the question, and the rules path", a.Tier, a.AgentReview.ContextFiles)
 	}
 	all, _ := json.Marshal(a.Reasons)
-	if strings.Contains(string(all), "half-to-even") || strings.Contains(string(all), "captured amount") || strings.Contains(a.AgentReview.Reason, "FR-12") {
-		t.Fatalf("business-rules text leaked into reasons: %s / %q", all, a.AgentReview.Reason)
+	if strings.Contains(string(all), "half-to-even") || strings.Contains(string(all), "captured amount") || strings.Contains(a.HumanCheck.Reason, "FR-12") {
+		t.Fatalf("business-rules text leaked into reasons: %s / %q", all, a.HumanCheck.Reason)
 	}
 
 	// A rules file outside .brisk/ still counts as brisk's own rules.
@@ -1180,5 +1185,56 @@ func TestFollowUpFixIsCalibrated(t *testing.T) {
 	w := table.Weights["follow_up"]
 	if got := risk01(1) - risk01(0); w <= 0 || math.Abs(got-w) > 0.002 {
 		t.Fatalf("follow_up_fix 1 vs 0 moved model risk by %.3f, want its weight %.3f (and not the flags weight %.3f)", got, w, table.Weights["flags"])
+	}
+}
+
+// Every assessment is appended to the repository's git directory, with the
+// human_check decision, its prompts and the provenance, so real use can be
+// judged later; BRISK_LOG moves it or turns it off, and the host request
+// (no assessment yet) is not logged.
+func TestAssessmentLog(t *testing.T) {
+	dir := newRepo(t)
+	write(t, dir, "db/migrations/002_drop.sql", "ALTER TABLE users DROP COLUMN email;\n")
+	read := func(p string) []LogLine {
+		t.Helper()
+		b, err := os.ReadFile(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []LogLine
+		for _, l := range strings.Split(strings.TrimSpace(string(b)), "\n") {
+			var x LogLine
+			if err := json.Unmarshal([]byte(l), &x); err != nil {
+				t.Fatal(err)
+			}
+			out = append(out, x)
+		}
+		return out
+	}
+	t.Setenv("BRISK_LOG", "")
+	a := assessJSON(t, "--repo", dir)
+	assessJSON(t, "--repo", dir)
+	if code, _, errs := runCLI(t, "assess", "--repo", dir, "--backend", "host", "--format", "json"); code != 0 {
+		t.Fatal(errs)
+	}
+	def := filepath.Join(dir, ".git", "brisk", "assessments.jsonl")
+	ls := read(def)
+	if len(ls) != 2 || !slices.Equal(ls[0].Files, []string{"db/migrations/002_drop.sql"}) || ls[0].Time.IsZero() {
+		t.Fatalf("log %+v; want two lines naming the changed file", ls)
+	}
+	got := ls[0].Assessment
+	if got.Tier != a.Tier || got.HumanCheck.Needed != a.HumanCheck.Needed || got.Provenance.DiffHash != a.Provenance.DiffHash || len(got.Provenance.RuleHits) == 0 {
+		t.Fatalf("logged %+v, printed %+v", got, a)
+	}
+	if out, _ := exec.Command("git", "-C", dir, "status", "--porcelain", "--ignored").Output(); strings.Contains(string(out), "brisk") {
+		t.Fatalf("the log shows up in git status: %s", out)
+	}
+	other := filepath.Join(t.TempDir(), "x", "log.jsonl")
+	t.Setenv("BRISK_LOG", other)
+	assessJSON(t, "--repo", dir)
+	t.Setenv("BRISK_LOG", "off")
+	assessJSON(t, "--repo", dir)
+	if len(read(other)) != 1 || len(read(def)) != 2 {
+		t.Fatal("BRISK_LOG must move the log, and off must stop it")
 	}
 }

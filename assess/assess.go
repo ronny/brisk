@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"runtime/debug"
 	"slices"
 	"sort"
 	"strings"
@@ -20,8 +21,36 @@ import (
 	"github.com/ronny/brisk/rules"
 )
 
-// Version is set at build time.
+// Version is the release tag, such as v20261118-01, set at build time
+// with -ldflags "-X github.com/ronny/brisk/assess.Version=<tag>". Other
+// builds report dev plus the commit they were built from.
 var Version = "dev"
+
+func init() {
+	if Version != "dev" {
+		return
+	}
+	bi, ok := debug.ReadBuildInfo()
+	if !ok {
+		return
+	}
+	var rev, dirty string
+	for _, s := range bi.Settings {
+		switch {
+		case s.Key == "vcs.revision" && len(s.Value) >= 12:
+			rev = s.Value[:12]
+		case s.Key == "vcs.modified" && s.Value == "true":
+			dirty = "-dirty"
+		}
+	}
+	switch {
+	case rev != "":
+		Version = "dev-" + rev + dirty
+	case bi.Main.Version != "" && bi.Main.Version != "(devel)":
+		// go install github.com/ronny/brisk/cmd/brisk@<tag> has no VCS settings.
+		Version = bi.Main.Version
+	}
+}
 
 // Engine holds the parts that do not change between assessments.
 type Engine struct {
@@ -136,7 +165,7 @@ func (e *Engine) Prepare(ctx context.Context, in Input) (*Prepared, error) {
 			return nil, err
 		}
 		p.Request, p.RequestID = &req, id
-		if p.Policy.TailorPlan() != "never" {
+		if p.Policy.Tailor() != "never" {
 			p.ReviewQuestions = reviewQuestions(p.planCandidates())
 		}
 	}
@@ -254,6 +283,23 @@ func (p *Prepared) Answer(ctx context.Context, b risk.Backend) risk.Assessment {
 	if b == nil || p.Request == nil {
 		return p.Finish("rules-only", nil, "")
 	}
+	// With tailor_plan always (the default) the review questions go out
+	// alongside the main ones; they are a separate call on the same state.
+	type result struct {
+		r   risk.Response
+		err error
+		ms  float64
+	}
+	review := func() result {
+		t := time.Now()
+		r, err := b.Answer(ctx, *p.ReviewRequest())
+		return result{r, err, float64(time.Since(t).Microseconds()) / 1000}
+	}
+	var early chan result
+	if p.Policy.Tailor() == "always" && p.ReviewRequest() != nil {
+		early = make(chan result, 1)
+		go func() { early <- review() }()
+	}
 	t := time.Now()
 	resp, err := b.Answer(ctx, *p.Request)
 	p.Timings["model"] = float64(time.Since(t).Microseconds()) / 1000
@@ -264,22 +310,26 @@ func (p *Prepared) Answer(ctx context.Context, b risk.Backend) risk.Assessment {
 		return p.Finish("rules-only", nil, b.Name()+": "+err.Error())
 	}
 	a := p.Finish(b.Name(), &resp, "")
-	// The review questions are a second call on the same state, made only
-	// when the policy wants it (by default: when a review is recommended).
-	// Without their answers the plan is brisk's alone, which is not an error.
-	if !p.WantsReviewAnswers(a) {
+	// Otherwise they are asked only when the policy wants them for this
+	// assessment (tailor_plan needed: when a person is asked). Without
+	// their answers the plan is brisk's alone, which is not an error.
+	var r result
+	switch {
+	case early != nil:
+		r = <-early
+	case p.WantsReviewAnswers(a):
+		r = review()
+	default:
 		return a
 	}
-	t = time.Now()
-	r, err := b.Answer(ctx, *p.ReviewRequest())
-	p.Timings["review_model"] = float64(time.Since(t).Microseconds()) / 1000
+	p.Timings["review_model"] = r.ms
 	switch {
-	case err != nil:
-		p.ReviewError = b.Name() + ": " + err.Error()
-	case !answersAll(r.Answers, p.ReviewQuestions):
+	case r.err != nil:
+		p.ReviewError = b.Name() + ": " + r.err.Error()
+	case !answersAll(r.r.Answers, p.ReviewQuestions):
 		p.ReviewError = b.Name() + ": the review answers do not answer every review question"
 	default:
-		p.ReviewAnswers, p.ReviewUsage = r.Answers, r.Usage
+		p.ReviewAnswers, p.ReviewUsage = r.r.Answers, r.r.Usage
 	}
 	return p.Finish(b.Name(), &resp, "")
 }
@@ -290,11 +340,11 @@ func (p *Prepared) WantsReviewAnswers(a risk.Assessment) bool {
 	if p.ReviewRequest() == nil {
 		return false
 	}
-	switch p.Policy.TailorPlan() {
+	switch p.Policy.Tailor() {
 	case "always":
 		return true
-	case "recommended":
-		return a.AgentReview.Recommended
+	case "needed":
+		return a.HumanCheck.Needed
 	}
 	return false
 }
@@ -478,12 +528,13 @@ func (p *Prepared) Finish(backend string, resp *risk.Response, degraded string) 
 		a.Reasons = []risk.Reason{}
 	}
 	a.Action = p.Policy.Actions[a.Tier]
-	a.AgentReview = p.Policy.AgentReview(a.Tier, a.Provenance.RuleHits, a.Provenance.Answers)
+	a.HumanCheck.Needed, a.HumanCheck.Why, a.HumanCheck.Reason = p.Policy.NeedsHuman(a.Tier, a.Provenance.RuleHits, a.Provenance.Answers)
 	var review map[string]risk.Answer
 	if resp != nil {
 		review = p.ReviewAnswers
 	}
 	a.AgentReview.Plan, a.Provenance.ReviewPlan = p.buildPlan(firedIDs, firedTier, a.Provenance.Answers, review)
+	a.HumanCheck.Consider = consider(a.HumanCheck.Needed, a.AgentReview.Plan)
 	if br := p.Context.BusinessRules; br != nil {
 		a.AgentReview.ContextFiles = []string{br.Path}
 	}

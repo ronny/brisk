@@ -35,7 +35,7 @@ var languageBackends = lang.Backends
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: brisk-eval fixq|label|prepare|answer|score|injection [flags]")
+		fmt.Fprintln(os.Stderr, "usage: brisk-eval fixq|label|prepare|answer|score|human|injection [flags]")
 		os.Exit(2)
 	}
 	ctx := context.Background()
@@ -51,6 +51,8 @@ func main() {
 		err = answer(ctx, os.Args[2:])
 	case "score":
 		err = score(os.Args[2:])
+	case "human":
+		err = human(ctx, os.Args[2:])
 	case "injection":
 		err = injection(ctx, os.Args[2:])
 	default:
@@ -365,11 +367,13 @@ type Report struct {
 // PresetSummary is one policy preset on the test set.
 type PresetSummary struct {
 	eval.Summary
-	AgentReviewShare   eval.Proportion `json:"agent_review_share"`
-	AgentReviewRecall  eval.Proportion `json:"agent_review_recall"`
-	BadRateReviewed    eval.Proportion `json:"bad_rate_agent_review"`
-	BadRateNotReviewed eval.Proportion `json:"bad_rate_no_agent_review"`
-	ReviewBelowHigh    int             `json:"agent_review_below_high"`
+	// HumanShare is the share of changes where human_check asks for a
+	// person; HumanRecall the share of bad changes it asks about.
+	HumanShare     eval.Proportion `json:"human_check_share"`
+	HumanRecall    eval.Proportion `json:"human_check_recall"`
+	BadRateHuman   eval.Proportion `json:"bad_rate_human_check"`
+	BadRateNoHuman eval.Proportion `json:"bad_rate_no_human_check"`
+	HumanBelowHigh int             `json:"human_check_below_high"`
 }
 
 func score(args []string) error {
@@ -384,7 +388,7 @@ func score(args []string) error {
 	reportPath := fs.String("report", "", "report JSON")
 	latPath := fs.String("latency-answers", "", "answers from sequential calls, for model latency")
 	features := fs.String("features", "", "comma-separated features to fit (ablation); default all")
-	presets := fs.String("presets", "autonomous,reviewed,strict", "comma-separated policy presets to report on the test set")
+	presets := fs.String("presets", "light,balanced,careful", "comma-separated policy presets to report on the test set")
 	quantilesOut := fs.String("quantiles-out", "", "with -table: write the table here with risk_quantiles from the training split")
 	fs.Parse(args)
 
@@ -517,6 +521,9 @@ func score(args []string) error {
 	}
 	rep.Presets = map[string]PresetSummary{}
 	for _, name := range splitList(*presets) {
+		if n, ok := assess.PresetAliases[name]; ok {
+			name = n
+		}
 		pol, ok := assess.Presets[name]
 		if !ok {
 			return fmt.Errorf("unknown preset %q", name)
@@ -531,7 +538,7 @@ func score(args []string) error {
 			if x.Bad {
 				bad++
 			}
-			if x.AgentReview.Recommended {
+			if x.NeedsHuman {
 				rec++
 				if x.Bad {
 					recBad++
@@ -546,11 +553,11 @@ func score(args []string) error {
 				}
 			}
 		}
-		ps.AgentReviewShare = eval.NewProportion(rec, len(ss))
-		ps.AgentReviewRecall = eval.NewProportion(recBad, bad)
-		ps.BadRateReviewed = eval.NewProportion(recBad, rec)
-		ps.BadRateNotReviewed = eval.NewProportion(otherBad, other)
-		ps.ReviewBelowHigh = recMedLow
+		ps.HumanShare = eval.NewProportion(rec, len(ss))
+		ps.HumanRecall = eval.NewProportion(recBad, bad)
+		ps.BadRateHuman = eval.NewProportion(recBad, rec)
+		ps.BadRateNoHuman = eval.NewProportion(otherBad, other)
+		ps.HumanBelowHigh = recMedLow
 		rep.Presets[name] = ps
 	}
 	rep.Test["combined"] = eval.Summarise(eval.Score(test, runs, table, 0))
@@ -655,12 +662,12 @@ func printSummary(rep Report, repos []string) {
 	sort.Strings(names)
 	for _, n := range names {
 		p := rep.Presets[n]
-		fmt.Printf("preset %-10s High flag %.2f recall %.2f [%.2f,%.2f] | Medium+ flag %.2f recall %.2f | bad rate L/M/H %.3f/%.3f/%.3f | agent review flag %.2f recall %.2f [%.2f,%.2f], bad rate %.3f vs %.3f without, %d below High\n",
+		fmt.Printf("preset %-10s High flag %.2f recall %.2f [%.2f,%.2f] | Medium+ flag %.2f recall %.2f | bad rate L/M/H %.3f/%.3f/%.3f | person asked %.2f recall %.2f [%.2f,%.2f], bad rate %.3f vs %.3f without, %d below High\n",
 			n, p.HighFlag.Value, p.HighRecall.Value, p.HighRecall.Low, p.HighRecall.High,
 			float64(p.TierCounts["medium"]+p.TierCounts["high"])/float64(max(1, p.N)), p.MedHighRec.Value,
 			p.BadRate["low"].Value, p.BadRate["medium"].Value, p.BadRate["high"].Value,
-			p.AgentReviewShare.Value, p.AgentReviewRecall.Value, p.AgentReviewRecall.Low, p.AgentReviewRecall.High,
-			p.BadRateReviewed.Value, p.BadRateNotReviewed.Value, p.ReviewBelowHigh)
+			p.HumanShare.Value, p.HumanRecall.Value, p.HumanRecall.Low, p.HumanRecall.High,
+			p.BadRateHuman.Value, p.BadRateNoHuman.Value, p.HumanBelowHigh)
 	}
 	fmt.Printf("stability %v\nlatency %v\ncost %v\nlabels %v\n", rep.Stability, rep.Latency, rep.Cost, rep.Labels)
 }

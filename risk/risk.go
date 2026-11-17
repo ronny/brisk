@@ -156,7 +156,7 @@ type Excerpt struct {
 // ---------------------------------------------------------------------------
 // Assessment (schema/assessment.schema.json)
 
-const AssessmentSchema = "brisk.assessment/v1"
+const AssessmentSchema = "brisk.assessment/v2"
 
 // Assessment is brisk's output.
 type Assessment struct {
@@ -166,21 +166,41 @@ type Assessment struct {
 	Impact      float64     `json:"impact"`      // 0–3
 	Uncertainty float64     `json:"uncertainty"` // 0–3
 	Action      string      `json:"action"`
+	HumanCheck  HumanCheck  `json:"human_check"`
 	AgentReview AgentReview `json:"agent_review"`
 	Reasons     []Reason    `json:"reasons"` // at most 3, strongest first
 	Stats       Stats       `json:"stats"`
 	Provenance  Provenance  `json:"provenance"`
 }
 
-// AgentReview says whether brisk recommends that a reviewing agent check
-// the change before it ships, separately from the tier: a Medium change
-// can recommend one. Reason is one sentence written by brisk, never text
-// from the repository.
+// HumanCheck says whether a person should look at the change too, on top
+// of the one agent review every change gets, and what they should think
+// about. Reason and every Consider text are brisk's catalog or the team's
+// base .brisk.yaml (Source "config"), never model or repository text;
+// Evidence paths and symbols are repository text.
+type HumanCheck struct {
+	Needed bool `json:"needed"`
+	// Why names the kind of condition that asked for a person: "tier",
+	// "rule", "answer" or "uncertainty"; empty when not needed.
+	Why    string `json:"why"`
+	Reason string `json:"reason"` // one sentence by brisk; empty when not needed
+	// Consider holds at most two things for the person to think about,
+	// most important first; empty when not needed.
+	Consider []Consider `json:"consider"`
+}
+
+// Consider is one question for the person, from the review area ID names.
+type Consider struct {
+	ID       string     `json:"id"`
+	Text     string     `json:"text"`
+	Source   string     `json:"source"` // "brisk" or "config"
+	Evidence []Evidence `json:"evidence"`
+}
+
+// AgentReview guides the agent review every change gets before it ships.
 type AgentReview struct {
-	Recommended bool   `json:"recommended"`
-	Reason      string `json:"reason"`
 	// Plan lists where a reviewer should look and what to check, most
-	// important first. It is built whether or not a review is recommended.
+	// important first.
 	Plan []ReviewArea `json:"plan"`
 	// ContextFiles are repository files, from the base .brisk.yaml, that a
 	// reviewer should read for the project's rules, such as the
@@ -341,8 +361,8 @@ type HostRequest struct {
 	// separate call on the same state; they are optional.
 	ReviewQuestions map[string]Question `json:"review_questions,omitempty"`
 	// ReviewWhen says when to answer ReviewQuestions: "always", or
-	// "recommended": only when the assessment from the main answers
-	// recommends an agent review (then rerun with review_answers).
+	// "needed": only when the assessment from the main answers asks for a
+	// person (human_check.needed; then rerun with review_answers).
 	ReviewWhen string `json:"review_when,omitempty"`
 	// Floor is the rules-only result, so a harness can show something
 	// before it has answers or when answering fails.
@@ -446,7 +466,7 @@ type ProjectContext struct {
 }
 
 // PolicyConfig is a team's risk policy from .brisk.yaml. Every field is
-// optional: a preset (default "reviewed") fills the rest. Tiers are
+// optional: a preset (default "balanced") fills the rest. Tiers are
 // written "low", "medium", "high".
 type PolicyConfig struct {
 	Preset string `json:"preset,omitempty" yaml:"preset"`
@@ -466,6 +486,7 @@ type PolicyConfig struct {
 	RuleTiers map[string]string `json:"rule_tiers,omitempty" yaml:"rule_tiers"`
 	// Actions is the text shown for each tier.
 	Actions     map[string]string  `json:"actions,omitempty" yaml:"actions"`
+	HumanCheck  *HumanCheckConfig  `json:"human_check,omitempty" yaml:"human_check"`
 	AgentReview *AgentReviewConfig `json:"agent_review,omitempty" yaml:"agent_review"`
 	// Questions are the project's own yes/no questions, asked in the same
 	// model request as brisk's.
@@ -499,22 +520,29 @@ type OverrideConfig struct {
 	Tier     string  `json:"tier" yaml:"tier"`
 }
 
-// AgentReviewConfig says when brisk recommends an agent review. Any one
+// HumanCheckConfig says when brisk asks for a person to look too. Any one
 // condition is enough; a field left out keeps the preset's value.
-type AgentReviewConfig struct {
-	// MinTier recommends a review at or above this tier; "none" turns
-	// the tier condition off.
+type HumanCheckConfig struct {
+	// MinTier asks at or above this tier; "none" turns the tier condition
+	// off.
 	MinTier *string `json:"min_tier,omitempty" yaml:"min_tier"`
-	// MinUncertainty recommends one when Jev rates the change at least
-	// this weakly verified (0–3); 0 turns it off.
+	// MinUncertainty asks when Jev rates the change at least this weakly
+	// verified (0–3); 0 turns it off.
 	MinUncertainty *float64 `json:"min_uncertainty,omitempty" yaml:"min_uncertainty"`
-	// Questions recommends one when a yes/no answer reaches its minimum.
+	// Questions asks when a yes/no answer reaches its minimum.
 	Questions map[string]float64 `json:"questions,omitempty" yaml:"questions"`
-	// Rules recommends one when any of these hits fires.
+	// Rules asks when any of these hits fires.
 	Rules []string `json:"rules,omitempty" yaml:"rules"`
+}
+
+// AgentReviewConfig configures the agent review every change gets. Its
+// condition keys are the old spelling of human_check's, still read; a key
+// in human_check wins.
+type AgentReviewConfig struct {
+	HumanCheckConfig `yaml:",inline"`
 	// TailorPlan says when to ask the model to score the review plan:
-	// "recommended" (default: only when a review is recommended),
-	// "always", or "never".
+	// "always" (default), "needed" (only when a person is asked; also
+	// spelt "recommended"), or "never".
 	TailorPlan *string `json:"tailor_plan,omitempty" yaml:"tailor_plan"`
 }
 

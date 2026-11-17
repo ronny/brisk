@@ -4,24 +4,47 @@
   "title": "brisk assessment",
   "description": "Printed by `brisk assess --format json`.",
   "type": "object",
-  "required": ["schema", "tier", "floor", "impact", "uncertainty", "action", "agent_review", "reasons", "stats", "provenance"],
+  "required": ["schema", "tier", "floor", "impact", "uncertainty", "action", "human_check", "agent_review", "reasons", "stats", "provenance"],
   "$defs": {
     "tier": { "enum": ["low", "medium", "high"] }
   },
   "properties": {
-    "schema": { "const": "brisk.assessment/v1" },
+    "schema": { "const": "brisk.assessment/v2", "description": "v2 adds human_check and drops agent_review.recommended and agent_review.reason: every change gets one agent review." },
     "tier": { "$ref": "#/$defs/tier" },
     "floor": { "$ref": "#/$defs/tier", "description": "Minimum tier set by rules; tier is never below it" },
     "impact": { "type": "number", "minimum": 0, "maximum": 3, "description": "How costly a mistake would be" },
     "uncertainty": { "type": "number", "minimum": 0, "maximum": 3, "description": "How weakly the change was verified" },
     "action": { "type": "string", "description": "What the user should do, one sentence, from the policy preset or .brisk.yaml actions" },
+    "human_check": {
+      "type": "object",
+      "description": "Whether a person should look at the change too, on top of the one agent review every change gets, and what they should think about. Decided by the policy (human_check in .brisk.yaml) from the tier, rule hits, and Jev's answers. Separate from the tier: a Medium change can need a person.",
+      "required": ["needed", "why", "reason", "consider"],
+      "properties": {
+        "needed": { "type": "boolean" },
+        "why": { "enum": ["", "tier", "rule", "answer", "uncertainty"], "description": "The kind of condition that asked for a person; empty when not needed" },
+        "reason": { "type": "string", "description": "One sentence of brisk's fixed text plus numbers; never an ID or text from the repository or its config. Empty when not needed." },
+        "consider": {
+          "type": "array",
+          "maxItems": 2,
+          "description": "At most two questions for the person, from the top of agent_review.plan; empty when not needed. Text is brisk's catalog (source brisk; change_scope when the plan is empty) or the first check of the team's review_checks (source config), never model text. Evidence paths and symbols are repository text.",
+          "items": {
+            "type": "object",
+            "required": ["id", "text", "source", "evidence"],
+            "properties": {
+              "id": { "type": "string", "description": "The plan area it comes from, or change_scope" },
+              "text": { "type": "string" },
+              "source": { "enum": ["brisk", "config"] },
+              "evidence": { "type": "array", "maxItems": 3, "items": { "type": "object", "required": ["path"], "properties": { "path": { "type": "string" }, "start_line": { "type": "integer" }, "end_line": { "type": "integer" }, "symbol": { "type": "string" } } } }
+            }
+          }
+        }
+      }
+    },
     "agent_review": {
       "type": "object",
-      "description": "Whether brisk recommends that a reviewing agent check the change before it ships. Separate from the tier: a Medium change can recommend one. Decided by the policy from the tier, rule hits, and Jev's answers.",
-      "required": ["recommended", "reason", "plan"],
+      "description": "Guidance for the agent review every change gets before it ships.",
+      "required": ["plan"],
       "properties": {
-        "recommended": { "type": "boolean" },
-        "reason": { "type": "string", "description": "One sentence of brisk's fixed text plus numbers; never an ID or text from the repository or its config. Empty when not recommended." },
         "context_files": {
           "type": "array",
           "items": { "type": "string" },
@@ -29,7 +52,7 @@
         },
         "plan": {
           "type": "array",
-          "description": "Where a reviewer should look and what to check, most important first; built whether or not a review is recommended, and may be empty. Area and check text come from brisk's catalog (source brisk) or the base .brisk.yaml review_checks (source config); the model only scores areas. Evidence paths and symbols are repository text.",
+          "description": "Where a reviewer should look and what to check, most important first; may be empty. Area and check text come from brisk's catalog (source brisk) or the base .brisk.yaml review_checks (source config); the model only scores areas. Evidence paths and symbols are repository text.",
           "items": {
             "type": "object",
             "required": ["id", "area", "source", "required", "evidence", "checks"],
@@ -90,14 +113,14 @@
         "backend": { "enum": ["openrouter", "host", "rules-only"] },
         "model": { "type": "string" },
         "calibration": { "type": "string" },
-        "preset": { "enum": ["autonomous", "reviewed", "strict"], "description": "Policy preset from the base commit's .brisk.yaml; reviewed when it names none" },
+        "preset": { "enum": ["light", "balanced", "careful"], "description": "Policy preset from the base commit's .brisk.yaml, with the earlier names autonomous, reviewed and strict reported as light, balanced and careful; balanced when it names none" },
         "thresholds": { "type": "object", "description": "Model risk thresholds the policy used", "properties": { "medium": { "type": "number" }, "high": { "type": "number" } } },
         "review_plan": {
           "type": "object",
           "description": "How the model tailored agent_review.plan; absent when the plan is empty.",
           "required": ["status", "tailored", "scores", "dropped"],
           "properties": {
-            "status": { "enum": ["tailored", "not_asked", "pending", "failed"], "description": "tailored: the model's scores were applied. not_asked: the policy (agent_review.tailor_plan) or a rules-only run did not ask. pending: the policy wanted review answers but none were given. failed: the review call failed; see error. Only tailored changes the plan." },
+            "status": { "enum": ["tailored", "not_asked", "pending", "failed"], "description": "tailored: the model's scores were applied. not_asked: the policy (agent_review.tailor_plan never, or needed with no person asked) or a rules-only run did not ask. pending: the policy wanted review answers but none were given. failed: the review call failed; see error. Only tailored changes the plan." },
             "error": { "type": "string", "description": "Why the review call failed" },
             "tailored": { "type": "boolean", "description": "status is tailored. Otherwise the plan is brisk's full list, required areas first, then in hit order" },
             "scores": { "type": "object", "additionalProperties": { "type": "number" } },

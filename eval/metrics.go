@@ -19,8 +19,8 @@ type Scored struct {
 	Model     string
 	Answered  bool
 	ModelMS   float64
-	// AgentReview is set by ScorePolicy.
-	AgentReview risk.AgentReview
+	// NeedsHuman is set by ScorePolicy.
+	NeedsHuman bool
 }
 
 // Score applies a calibration table to the first run of answers for each
@@ -43,7 +43,7 @@ func Score(recs []Record, runs map[string][]Run, t *calibration.Table, run int) 
 }
 
 // ScorePolicy scores like Score with a policy's thresholds and overrides,
-// and records its agent-review recommendation. Policies with rule_tiers
+// and records whether it asks for a person. Policies with rule_tiers
 // are not supported: records keep the floor from when they were prepared.
 func ScorePolicy(recs []Record, runs map[string][]Run, t *calibration.Table, pol assess.Policy) ([]Scored, error) {
 	pt, err := pol.Table(t)
@@ -59,7 +59,7 @@ func ScorePolicy(recs []Record, runs map[string][]Run, t *calibration.Table, pol
 		if rs := runs[ss[i].RequestID]; len(rs) > 0 {
 			answers = rs[0].Answers
 		}
-		ss[i].AgentReview = pol.AgentReview(ss[i].Tier, ss[i].Hits, answers)
+		ss[i].NeedsHuman, _, _ = pol.NeedsHuman(ss[i].Tier, ss[i].Hits, answers)
 	}
 	return ss, nil
 }

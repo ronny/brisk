@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"sync"
 	"testing"
 
 	"github.com/ronny/brisk/assess"
@@ -16,6 +17,7 @@ import (
 // stubBackend answers every question with v and counts its calls; review
 // calls fail when reviewErr is set, and answer nothing when partial is.
 type stubBackend struct {
+	mu        sync.Mutex // review and main calls may run at once
 	v         float64
 	reviewErr error
 	partial   bool
@@ -26,6 +28,8 @@ type stubBackend struct {
 func (s *stubBackend) Name() string { return "stub" }
 
 func (s *stubBackend) Answer(_ context.Context, req risk.Request) (risk.Response, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.calls++
 	review := false
 	ans := map[string]risk.Answer{}
@@ -52,8 +56,8 @@ func (s *stubBackend) Answer(_ context.Context, req risk.Request) (risk.Response
 	return risk.Response{Model: "jev-1.14.0", Answers: ans, Usage: &risk.Usage{InputTokens: 1000, CostUSD: 0.01}}, nil
 }
 
-// The review questions cost a second model call only when the policy wants
-// them: by default when a review is recommended. Their cost is added to
+// The review questions are a second model call: by default always, or with
+// tailor_plan needed only when a person is asked. Their cost is added to
 // provenance.usage, and a failed review call is told apart from not asking.
 func TestReviewCallOnlyWhenWanted(t *testing.T) {
 	ctx := context.Background()
@@ -86,11 +90,13 @@ func TestReviewCallOnlyWhenWanted(t *testing.T) {
 		tokens       int
 		wantReviewed bool
 	}{
-		{"not recommended: one call", "", 0, nil, false, 1, "not_asked", 1000, false},
-		{"recommended: two calls", "", 0.95, nil, false, 2, "tailored", 1100, true},
+		{"default asks when no person is needed", "", 0, nil, false, 2, "tailored", 1100, false},
+		{"default asks when a person is needed", "", 0.95, nil, false, 2, "tailored", 1100, true},
 		{"review call fails", "", 0.95, errors.New("boom"), false, 2, "failed", 1000, true},
-		{"always asks", "agent_review:\n  tailor_plan: always\n", 0, nil, false, 2, "tailored", 1100, false},
 		{"partial review answers fail", "", 0.95, nil, true, 2, "failed", 1000, true},
+		{"needed: no person, one call", "agent_review:\n  tailor_plan: needed\n", 0, nil, false, 1, "not_asked", 1000, false},
+		{"needed: a person, two calls", "agent_review:\n  tailor_plan: needed\n", 0.95, nil, false, 2, "tailored", 1100, true},
+		{"recommended is needed", "agent_review:\n  tailor_plan: recommended\n", 0, nil, false, 1, "not_asked", 1000, false},
 		{"never asks", "agent_review:\n  tailor_plan: never\n", 0.95, nil, false, 1, "not_asked", 1000, true},
 	}
 	for _, c := range cases {
@@ -99,8 +105,8 @@ func TestReviewCallOnlyWhenWanted(t *testing.T) {
 			b := &stubBackend{v: c.v, reviewErr: c.reviewErr, partial: c.partial}
 			a := p.Answer(ctx, b)
 			rp := a.Provenance.ReviewPlan
-			if b.calls != c.calls || rp == nil || rp.Status != c.status || a.AgentReview.Recommended != c.wantReviewed {
-				t.Fatalf("calls %d review_plan %+v recommended %v; want %d calls, status %s, recommended %v", b.calls, rp, a.AgentReview.Recommended, c.calls, c.status, c.wantReviewed)
+			if b.calls != c.calls || rp == nil || rp.Status != c.status || a.HumanCheck.Needed != c.wantReviewed {
+				t.Fatalf("calls %d review_plan %+v needed %v; want %d calls, status %s, needed %v", b.calls, rp, a.HumanCheck.Needed, c.calls, c.status, c.wantReviewed)
 			}
 			if a.Provenance.Usage == nil || a.Provenance.Usage.InputTokens != c.tokens {
 				t.Fatalf("usage %+v, want %d input tokens", a.Provenance.Usage, c.tokens)
@@ -183,13 +189,13 @@ questions:
 	}
 }
 
-// A review recommended by an answer alone, below every override, still
-// gets the area for that answer.
+// A person asked for by an answer alone, below every override, still gets
+// the area for that answer, and it is what they are asked to consider.
 func TestAnswerRecommendedReviewHasAPlan(t *testing.T) {
 	p := prepare(t, "", map[string]string{"internal/store/users.go": "package store\n\nfunc Users() { /* all users */ }\n"})
 	a := p.Answer(context.Background(), &stubBackend{v: 0.6})
-	if !a.AgentReview.Recommended || !slices.Contains(planIDs(a), "access_checks") {
-		t.Fatalf("recommended %v reason %q plan %v; want access_checks", a.AgentReview.Recommended, a.AgentReview.Reason, planIDs(a))
+	if h := a.HumanCheck; !h.Needed || h.Why != "answer" || !slices.Contains(planIDs(a), "access_checks") || !slices.ContainsFunc(h.Consider, func(c risk.Consider) bool { return c.ID == "access_checks" }) {
+		t.Fatalf("human_check %+v plan %v; want access_checks", a.HumanCheck, planIDs(a))
 	}
 	for _, x := range a.AgentReview.Plan {
 		if x.Required {
@@ -218,4 +224,64 @@ review_checks:
 	if a.Provenance.ReviewPlan.Status != "tailored" || i < 0 || j < 0 || i > j {
 		t.Fatalf("plan %v; want access_checks (High override) before the scored config_sharing", ids)
 	}
+}
+
+// human_check.consider gives a person at most two questions, from the top
+// of the review plan: brisk's question for a catalog area, the team's first
+// check for its own area, and a general question when the plan is empty.
+// Nothing when no person is needed.
+func TestHumanCheckConsider(t *testing.T) {
+	ctx := context.Background()
+	t.Run("plan order, team text, at most two", func(t *testing.T) {
+		p := prepare(t, `content_rules:
+  - id: sharing
+    paths: ["docs/**"]
+    pattern: 'Visible'
+    floor: high
+    reason: Sharing rule.
+review_checks:
+  sharing:
+    area: Document sharing
+    checks: [Confirm drafts stay hidden from shared links., Second check.]
+`, map[string]string{"docs/share.go": "package docs\n\nvar Visible = true\n", "db/migrations/004.sql": "DROP TABLE notes;\n"})
+		a := p.Answer(ctx, &stubBackend{v: 0.95})
+		h := a.HumanCheck
+		if !h.Needed || len(h.Consider) != 2 || len(a.AgentReview.Plan) < 3 {
+			t.Fatalf("human_check %+v plan %v; want two questions from a longer plan", h, planIDs(a))
+		}
+		for i, c := range h.Consider {
+			if c.ID != a.AgentReview.Plan[i].ID {
+				t.Fatalf("consider %d is %s, want plan order %v", i, c.ID, planIDs(a))
+			}
+			want := map[string]string{"config_sharing": "Confirm drafts stay hidden from shared links.", "data_loss": "Is it safe to lose the data this deletes, and is there a way back if not?"}[c.ID]
+			if want != "" && c.Text != want {
+				t.Fatalf("consider %s text %q, want %q", c.ID, c.Text, want)
+			}
+		}
+	})
+	t.Run("not needed: nothing to consider", func(t *testing.T) {
+		p := prepare(t, "", map[string]string{"db/migrations/003_note.sql": "ALTER TABLE users ADD COLUMN note text;\n"})
+		a := p.Answer(ctx, &stubBackend{v: 0.4}) // relevance 1.2 keeps the area
+		if h := a.HumanCheck; h.Needed || h.Why != "" || h.Reason != "" || h.Consider == nil || len(h.Consider) != 0 || len(a.AgentReview.Plan) == 0 {
+			t.Fatalf("human_check %+v plan %v; want not needed with an empty list and a plan for the agent", h, planIDs(a))
+		}
+	})
+	t.Run("empty plan: the general question", func(t *testing.T) {
+		p := prepare(t, "", map[string]string{"calc/add.go": "package calc\n\nfunc Add(a, b int) int { return a + b }\n"})
+		three, zero := 2.9, 0.0
+		ans := map[string]risk.Answer{}
+		for name, q := range p.Request.Questions {
+			if q.Type == "score" {
+				ans[name] = risk.Answer{Type: "score", Score: &zero}
+			} else {
+				ans[name] = risk.Answer{Type: "noul", Noul: &zero}
+			}
+		}
+		ans["impact"] = risk.Answer{Type: "score", Score: &three}
+		a := p.Finish("stub", &risk.Response{Model: "jev-1.14.0", Answers: ans}, "")
+		h := a.HumanCheck
+		if a.Tier != risk.High || len(a.AgentReview.Plan) != 0 || !h.Needed || len(h.Consider) != 1 || h.Consider[0].ID != "change_scope" {
+			t.Fatalf("tier %s plan %v human_check %+v; want High, empty plan, change_scope", a.Tier, planIDs(a), h)
+		}
+	})
 }

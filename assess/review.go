@@ -212,9 +212,9 @@ func checkTexts(a risk.ReviewArea) []string {
 // model overrides that raised the tier; they add areas Jev did not score.
 // review holds Jev's answers to the review questions, or nil.
 //
-// answers are the main answers, or nil: an answer that meets an
-// agent_review condition adds its area too, so a review recommended by an
-// answer alone still has somewhere to look.
+// answers are the main answers, or nil: an answer that meets a
+// human_check condition adds its area too, so a person asked for by an
+// answer alone has something to consider.
 func (p *Prepared) buildPlan(fired []string, firedTier map[string]risk.Tier, answers, review map[string]risk.Answer) ([]risk.ReviewArea, *risk.ReviewPlanProvenance) {
 	areas := p.planCandidates()
 	idx := map[string]int{}
@@ -284,4 +284,58 @@ func (p *Prepared) buildPlan(fired []string, firedTier map[string]risk.Tier, ans
 		return false
 	})
 	return kept, prov
+}
+
+// humanPrompts is brisk's question for a person, by review area: what to
+// think about rather than what to check line by line, which the agent
+// review does.
+var humanPrompts = map[string]string{
+	"access_checks":      "Who should be allowed to do this, and does the change still enforce it?",
+	"stored_data":        "What happens to existing data while this deploys, and how would you roll it back?",
+	"data_loss":          "Is it safe to lose the data this deletes, and is there a way back if not?",
+	"secrets":            "Is this a real credential, and if so, who rotates it?",
+	"transport_security": "Should certificate checks really be off anywhere outside tests?",
+	"money":              "Could this charge, refund or round anyone's money wrongly, including on a retry?",
+	"contracts":          "Who depends on this interface, and will they break when it ships?",
+	"build_deploy":       "Will this build, deploy and start where it runs, with the configuration it needs?",
+	"dependencies":       "Do you want this new or upgraded dependency in the project?",
+	"tests":              "Is it right that these tests are removed, skipped or weakened?",
+	"error_handling":     "When this fails, will someone notice, and what will users see?",
+	"concurrency":        "Could two requests or workers race here, and what would break if they did?",
+	"hidden_code":        "Should these hidden, nested or generated files ship as they are?",
+	"risk_policy":        "Does the team agree with this change to brisk's risk policy?",
+	"weak_verification":  "Which behaviour does this change that nothing has tested, and is that acceptable?",
+	"verification":       "Checks failed during the session; is it right to ship before they pass?",
+	"project_rule":       "Does the change still respect the project rule or question that flagged it?",
+	"change_scope":       "Is this the change you meant to make, and is now the right time to ship it?",
+}
+
+// maxConsider caps human_check.consider.
+const maxConsider = 2
+
+// consider picks what a person should think about: the top review areas,
+// in plan order, each as one question. A team's own area (source config)
+// asks its first check. Nothing when no person is needed.
+func consider(needed bool, plan []risk.ReviewArea) []risk.Consider {
+	out := []risk.Consider{}
+	if !needed {
+		return out
+	}
+	for _, a := range plan {
+		if len(out) == maxConsider {
+			break
+		}
+		c := risk.Consider{ID: a.ID, Source: a.Source, Text: humanPrompts[a.ID], Evidence: append([]risk.Evidence{}, a.Evidence[:min(len(a.Evidence), 3)]...)}
+		if a.Source == "config" && len(a.Checks) > 0 {
+			c.Text = a.Checks[0].Text
+		}
+		if c.Text == "" {
+			continue
+		}
+		out = append(out, c)
+	}
+	if len(out) == 0 {
+		out = append(out, risk.Consider{ID: "change_scope", Source: "brisk", Text: humanPrompts["change_scope"], Evidence: []risk.Evidence{}})
+	}
+	return out
 }

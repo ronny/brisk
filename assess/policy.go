@@ -11,8 +11,9 @@ import (
 )
 
 // Policy is a team's risk appetite: how much the model may flag, what each
-// tier asks for, and when to recommend an agent review. It comes from a
-// preset, adjusted by .brisk.yaml from the base commit.
+// tier asks for, and when to bring a person in on top of the agent review
+// every change gets. It comes from a preset, adjusted by .brisk.yaml from
+// the base commit.
 type Policy struct {
 	Preset      string
 	HighShare   *float64                // share of changes the model alone puts at High
@@ -21,8 +22,11 @@ type Policy struct {
 	Overrides   []calibration.Override  // nil keeps the calibration's
 	RuleTiers   map[string]risk.Tier
 	Actions     map[risk.Tier]string
-	Review      ReviewPolicy
-	Questions   []CustomQuestion // the project's own yes/no questions
+	Human       HumanPolicy
+	// TailorPlan says when to ask the model to score the review plan:
+	// "always" (the default when empty), "needed" or "never".
+	TailorPlan string
+	Questions  []CustomQuestion // the project's own yes/no questions
 	// ReviewChecks are the team's review areas, by project rule or question id.
 	ReviewChecks map[string]ReviewCheckConfig
 }
@@ -58,29 +62,29 @@ func (p Policy) questionText(id, text string, answers map[string]risk.Answer) st
 	return text
 }
 
-// ReviewTriggers returns the questions whose answers meet an agent_review
+// ReviewTriggers returns the questions whose answers meet a human_check
 // condition (a yes/no minimum, or min_uncertainty), sorted.
 func (p Policy) ReviewTriggers(answers map[string]risk.Answer) []string {
 	var out []string
-	for q, min := range p.Review.Questions {
+	for q, min := range p.Human.Questions {
 		if a := answers[q]; a.Noul != nil && *a.Noul >= min {
 			out = append(out, q)
 		}
 	}
-	if a := answers["uncertainty"]; p.Review.MinUncertainty > 0 && a.Score != nil && *a.Score >= p.Review.MinUncertainty {
+	if a := answers["uncertainty"]; p.Human.MinUncertainty > 0 && a.Score != nil && *a.Score >= p.Human.MinUncertainty {
 		out = append(out, "uncertainty")
 	}
 	sort.Strings(out)
 	return out
 }
 
-// TailorPlan says when to ask the model to score the review plan;
-// "recommended" unless the config chose otherwise.
-func (p Policy) TailorPlan() string {
-	if p.Review.TailorPlan == "" {
-		return "recommended"
+// Tailor says when to ask the model to score the review plan: "always"
+// unless the config chose "needed" or "never".
+func (p Policy) Tailor() string {
+	if p.TailorPlan == "" {
+		return "always"
 	}
-	return p.Review.TailorPlan
+	return p.TailorPlan
 }
 
 // RequestQuestions returns brisk's questions plus the project's.
@@ -95,70 +99,67 @@ func (p Policy) RequestQuestions() map[string]risk.Question {
 	return out
 }
 
-// ReviewPolicy says when to recommend an agent review. Any one condition
-// is enough.
-type ReviewPolicy struct {
+// HumanPolicy says when to bring a person in. Any one condition is enough.
+type HumanPolicy struct {
 	ByTier         bool
 	MinTier        risk.Tier
 	MinUncertainty float64            // Jev's uncertainty score, 0–3; 0 is off
 	Questions      map[string]float64 // yes/no answer minimums
 	Rules          []string           // hit IDs
-	TailorPlan     string             // "recommended", "always" or "never"
 }
 
 // DefaultPreset is used when .brisk.yaml names none.
-const DefaultPreset = "reviewed"
+const DefaultPreset = "balanced"
+
+// PresetAliases are the earlier preset names, still accepted.
+var PresetAliases = map[string]string{"autonomous": "light", "reviewed": "balanced", "strict": "careful"}
 
 // dangerRules are rules whose hits always deserve a second look.
 var dangerRules = []string{"secret_added", "tls_disabled", "gitignore_hides_code", "nested_repo", "generated_without_source", "generated_hand_edited"}
 
 func f(x float64) *float64 { return &x }
 
-// Presets are the named starting points. The names match the Amp plugin's
-// amp.brisk.preset setting, so a team picks one name everywhere.
+// Presets are the named starting points. Every change gets one agent
+// review; a preset sets how often a person is asked to look too. The names
+// match the Amp plugin's amp.brisk.preset setting, so a team picks one name
+// everywhere.
 //
-//   - autonomous: nobody reviews changes by hand. High asks for an agent
-//     review. The model alone puts the riskiest 18% of changes at High;
-//     with the rule floor that is about 25% High and 29% agent reviews in
-//     the evaluation, under a ~30% review budget.
-//   - reviewed: teams with human reviewers. The calibrated thresholds; High
-//     asks for a human review, and an agent review is recommended for High
-//     and for strong single signals.
-//   - strict: high-stakes code. Medium and High are widened (about 39%
-//     High in the evaluation), and every
-//     Medium or High change gets an agent review before a human one.
+//   - light: a person only for strong single signals: a danger rule, or
+//     Jev nearly sure the change weakens access checks or destroys data.
+//   - balanced (default): High, or a strong single signal. The calibrated
+//     thresholds.
+//   - careful: high-stakes code. Medium and High are widened (about 39%
+//     High in the evaluation), and a person is asked from Medium.
 var Presets = map[string]Policy{
-	"autonomous": {
-		Preset:    "autonomous",
-		HighShare: f(0.18),
+	"light": {
+		Preset: "light",
 		Actions: map[risk.Tier]string{
-			risk.High:   "Run an agent review of the listed reasons and fix what it finds before shipping.",
-			risk.Medium: "Check the listed reasons yourself before shipping.",
-			risk.Low:    "No extra review needed.",
+			risk.High:   "Fix what the agent review finds in the listed reasons before shipping.",
+			risk.Medium: "Make sure the agent review covers the listed reasons.",
+			risk.Low:    "The agent review is enough.",
 		},
-		Review: ReviewPolicy{ByTier: true, MinTier: risk.High, MinUncertainty: 2.5,
+		Human: HumanPolicy{Questions: map[string]float64{"weakens_auth": 0.8, "destroys_data": 0.9}, Rules: dangerRules},
+	},
+	"balanced": {
+		Preset: "balanced",
+		Actions: map[risk.Tier]string{
+			risk.High:   "After the agent review, ask a person to think through the points under human_check before shipping.",
+			risk.Medium: "Make sure the agent review covers the listed reasons.",
+			risk.Low:    "The agent review is enough.",
+		},
+		Human: HumanPolicy{ByTier: true, MinTier: risk.High,
 			Questions: map[string]float64{"weakens_auth": 0.5, "destroys_data": 0.5}, Rules: dangerRules},
 	},
-	"reviewed": {
-		Preset: "reviewed",
-		Actions: map[risk.Tier]string{
-			risk.High:   "Get a second review of the listed reasons before shipping.",
-			risk.Medium: "Review the files named in the reasons before shipping.",
-			risk.Low:    "No extra review needed.",
-		},
-		Review: ReviewPolicy{ByTier: true, MinTier: risk.High,
-			Questions: map[string]float64{"weakens_auth": 0.5, "destroys_data": 0.5}, Rules: dangerRules},
-	},
-	"strict": {
-		Preset:      "strict",
+	"careful": {
+		Preset:      "careful",
 		HighShare:   f(0.30),
 		MediumShare: f(0.60),
 		Actions: map[risk.Tier]string{
-			risk.High:   "Run an agent review, then get a human review of the listed reasons before shipping.",
-			risk.Medium: "Run an agent review, then review the files named in the reasons before shipping.",
-			risk.Low:    "No extra review needed.",
+			risk.High:   "After the agent review, ask a person to think through the points under human_check before shipping.",
+			risk.Medium: "After the agent review, ask a person to think through the points under human_check before shipping.",
+			risk.Low:    "The agent review is enough.",
 		},
-		Review: ReviewPolicy{ByTier: true, MinTier: risk.Medium, MinUncertainty: 2.0,
+		Human: HumanPolicy{ByTier: true, MinTier: risk.Medium, MinUncertainty: 2.0,
 			Questions: map[string]float64{"weakens_auth": 0.3, "destroys_data": 0.3}, Rules: dangerRules},
 	},
 }
@@ -168,6 +169,9 @@ func ResolvePolicy(cfg risk.PolicyConfig) (Policy, error) {
 	name := cfg.Preset
 	if name == "" {
 		name = DefaultPreset
+	}
+	if n, ok := PresetAliases[name]; ok {
+		name = n
 	}
 	base, ok := Presets[name]
 	if !ok {
@@ -180,8 +184,8 @@ func ResolvePolicy(cfg risk.PolicyConfig) (Policy, error) {
 	}
 	p := base
 	p.Actions = cloneMap(base.Actions)
-	p.Review.Questions = cloneMap(base.Review.Questions)
-	p.Review.Rules = slices.Clone(base.Review.Rules)
+	p.Human.Questions = cloneMap(base.Human.Questions)
+	p.Human.Rules = slices.Clone(base.Human.Rules)
 
 	share := func(name string, v *float64) (*float64, error) {
 		if v != nil && !(*v >= 0 && *v <= 1) {
@@ -299,46 +303,63 @@ func ResolvePolicy(cfg risk.PolicyConfig) (Policy, error) {
 		}
 		p.ReviewChecks[id] = ReviewCheckConfig{Area: c.Area, Checks: c.Checks}
 	}
+	// agent_review's condition keys are the old spelling of
+	// human_check's; human_check's win.
 	if r := cfg.AgentReview; r != nil {
-		if r.MinTier != nil {
-			if *r.MinTier == "none" {
-				p.Review.ByTier = false
-			} else {
-				t, err := risk.ParseTier(*r.MinTier)
-				if err != nil {
-					return Policy{}, fmt.Errorf("agent_review.min_tier: %w", err)
-				}
-				p.Review.ByTier, p.Review.MinTier = true, t
-			}
-		}
-		if r.MinUncertainty != nil {
-			p.Review.MinUncertainty = *r.MinUncertainty
-		}
-		if r.Questions != nil {
-			for q := range r.Questions {
-				_, builtin := Questions[q]
-				if !builtin && !slices.ContainsFunc(p.Questions, func(c CustomQuestion) bool { return c.ID == q }) {
-					return Policy{}, fmt.Errorf("agent_review.questions: unknown question %q", q)
-				}
-			}
-			p.Review.Questions = r.Questions
-		}
-		if r.Rules != nil {
-			p.Review.Rules = r.Rules
+		if err := p.applyHuman(r.HumanCheckConfig, "agent_review"); err != nil {
+			return Policy{}, err
 		}
 		if r.TailorPlan != nil {
 			switch *r.TailorPlan {
-			case "recommended", "always", "never":
-				p.Review.TailorPlan = *r.TailorPlan
+			case "always", "needed", "never":
+				p.TailorPlan = *r.TailorPlan
+			case "recommended":
+				p.TailorPlan = "needed"
 			default:
-				return Policy{}, fmt.Errorf("agent_review.tailor_plan %q: want recommended, always or never", *r.TailorPlan)
+				return Policy{}, fmt.Errorf("agent_review.tailor_plan %q: want always, needed or never", *r.TailorPlan)
 			}
+		}
+	}
+	if r := cfg.HumanCheck; r != nil {
+		if err := p.applyHuman(*r, "human_check"); err != nil {
+			return Policy{}, err
 		}
 	}
 	return p, nil
 }
 
-// CheckIDs reports rule IDs in rule_tiers and agent_review.rules that no
+// applyHuman sets the human_check conditions r names; key prefixes errors.
+func (p *Policy) applyHuman(r risk.HumanCheckConfig, key string) error {
+	if r.MinTier != nil {
+		if *r.MinTier == "none" {
+			p.Human.ByTier = false
+		} else {
+			t, err := risk.ParseTier(*r.MinTier)
+			if err != nil {
+				return fmt.Errorf("%s.min_tier: %w", key, err)
+			}
+			p.Human.ByTier, p.Human.MinTier = true, t
+		}
+	}
+	if r.MinUncertainty != nil {
+		p.Human.MinUncertainty = *r.MinUncertainty
+	}
+	if r.Questions != nil {
+		for q := range r.Questions {
+			_, builtin := Questions[q]
+			if !builtin && !slices.ContainsFunc(p.Questions, func(c CustomQuestion) bool { return c.ID == q }) {
+				return fmt.Errorf("%s.questions: unknown question %q", key, q)
+			}
+		}
+		p.Human.Questions = r.Questions
+	}
+	if r.Rules != nil {
+		p.Human.Rules = r.Rules
+	}
+	return nil
+}
+
+// CheckIDs reports rule IDs in rule_tiers and human_check.rules that no
 // rule can set, and project rule IDs (sensitive_paths, content_rules) that
 // clash with built-in ones, so a
 // misspelt ID is an error rather than a setting that does nothing.
@@ -359,14 +380,14 @@ func (p Policy) CheckIDs(known map[string]bool, project []string) error {
 			bad = append(bad, id)
 		}
 	}
-	for _, id := range p.Review.Rules {
+	for _, id := range p.Human.Rules {
 		if !ids[id] {
 			bad = append(bad, id)
 		}
 	}
 	if len(bad) > 0 {
 		sort.Strings(bad)
-		return fmt.Errorf("unknown rule ids %v in rule_tiers or agent_review.rules", bad)
+		return fmt.Errorf("unknown rule ids %v in rule_tiers or human_check.rules", bad)
 	}
 	for _, q := range p.Questions {
 		if known[q.ID] || slices.Contains(project, q.ID) {
@@ -423,23 +444,23 @@ func (p Policy) Table(t *calibration.Table) (*calibration.Table, error) {
 	return &out, nil
 }
 
-// AgentReview decides whether to recommend an agent review. hits are rule
-// and finding IDs; answers may be nil (rules only). The reason is fixed
-// text plus numbers, never an ID or text from the repository or its
-// config, because a harness may put it into an agent's prompt unread.
-func (p Policy) AgentReview(tier risk.Tier, hits []string, answers map[string]risk.Answer) risk.AgentReview {
-	r := p.Review
+// NeedsHuman decides whether to ask a person to look too. hits are rule
+// and finding IDs; answers may be nil (rules only). why and the reason
+// are fixed text plus numbers, never an ID or text from the repository or
+// its config, because a harness may put them into a prompt unread.
+func (p Policy) NeedsHuman(tier risk.Tier, hits []string, answers map[string]risk.Answer) (needed bool, why, reason string) {
+	r := p.Human
 	if r.ByTier && tier >= r.MinTier {
-		return risk.AgentReview{Recommended: true, Reason: fmt.Sprintf("The change is %s risk.", titleTier(tier))}
+		return true, "tier", fmt.Sprintf("The change is %s risk.", titleTier(tier))
 	}
 	for _, id := range r.Rules {
 		// Project rules from sensitive_paths hit as config:<id>.
 		if slices.Contains(hits, id) || slices.Contains(hits, "config:"+id) {
 			text := ruleReviewText[id]
 			if text == "" {
-				text = "A rule chosen for agent review fired."
+				text = "A rule this project asks a person about fired."
 			}
-			return risk.AgentReview{Recommended: true, Reason: text}
+			return true, "rule", text
 		}
 	}
 	qs := make([]string, 0, len(r.Questions))
@@ -456,13 +477,13 @@ func (p Policy) AgentReview(tier risk.Tier, hits []string, answers map[string]ri
 			if text == "" {
 				text = "Jev flagged a risk"
 			}
-			return risk.AgentReview{Recommended: true, Reason: fmt.Sprintf("%s (Jev: %.2f).", text, v)}
+			return true, "answer", fmt.Sprintf("%s (Jev: %.2f).", text, v)
 		}
 	}
 	if a, ok := answers["uncertainty"]; ok && r.MinUncertainty > 0 && a.Score != nil && *a.Score >= r.MinUncertainty {
-		return risk.AgentReview{Recommended: true, Reason: fmt.Sprintf("Jev rates the change weakly verified (%.1f of 3).", *a.Score)}
+		return true, "uncertainty", fmt.Sprintf("Jev rates the change weakly verified (%.1f of 3).", *a.Score)
 	}
-	return risk.AgentReview{}
+	return false, "", ""
 }
 
 var ruleReviewText = map[string]string{

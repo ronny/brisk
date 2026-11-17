@@ -37,7 +37,7 @@
         }
       }
     },
-    "review_when": { "enum": ["recommended", "always"], "description": "Present with review_questions. always: answer them with the main questions. recommended: answer them only if `brisk assess --answers` without review_answers gives agent_review.recommended, then run it again with review_answers." },
+    "review_when": { "enum": ["needed", "always"], "description": "Present with review_questions. always (the default): answer them with the main questions. needed: answer them only if `brisk assess --answers` without review_answers gives human_check.needed, then run it again with review_answers." },
     "floor_assessment": { "$ref": "assessment.schema.json" }
   }
 }

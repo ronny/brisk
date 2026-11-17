@@ -26,6 +26,9 @@ const usage = `usage: brisk assess [flags]
        brisk version
 
 Rates how risky the change from --base to --head (or the working tree) is.
+Each assessment is appended to .git/brisk/assessments.jsonl, never
+committed, so real use can be judged later; BRISK_LOG sets another file,
+or off.
 
 Flags:
 `
@@ -182,6 +185,9 @@ func assessCmd(ctx context.Context, args []string, stdout, stderr io.Writer) (in
 	} else {
 		a = p.Answer(ctx, backend)
 	}
+	if err := logAssessment(logPath(ctx, repo), p, a); err != nil {
+		fmt.Fprintln(stderr, "brisk: could not log the assessment:", err)
+	}
 
 	if *format == "json" {
 		if err := writeJSON(stdout, a); err != nil {
@@ -234,8 +240,11 @@ func writeText(w io.Writer, a risk.Assessment) {
 		fmt.Fprintln(w)
 	}
 	fmt.Fprintf(w, "Action: %s\n", a.Action)
-	if a.AgentReview.Recommended {
-		fmt.Fprintf(w, "Agent review: recommended. %s\n", a.AgentReview.Reason)
+	if h := a.HumanCheck; h.Needed {
+		fmt.Fprintf(w, "Bring a person in: %s\n", h.Reason)
+		for _, c := range h.Consider {
+			fmt.Fprintf(w, "  ? %s\n", c.Text)
+		}
 	}
 	src := a.Provenance.Backend
 	if a.Provenance.Model != "" {
@@ -252,5 +261,5 @@ func reviewWhen(p *assess.Prepared) string {
 	if len(p.ReviewQuestions) == 0 {
 		return ""
 	}
-	return p.Policy.TailorPlan()
+	return p.Policy.Tailor()
 }

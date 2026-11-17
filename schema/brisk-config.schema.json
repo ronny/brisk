@@ -77,8 +77,8 @@
       }
     },
     "preset": {
-      "enum": ["autonomous", "reviewed", "strict"],
-      "description": "autonomous: nobody reviews by hand; High (about 25% of changes in the evaluation) asks for an agent review. reviewed (default): human reviewers; the calibrated thresholds. strict: high-stakes code; wider Medium and High, and an agent review for every Medium or High change. The names match the Amp plugin's amp.brisk.preset."
+      "enum": ["light", "balanced", "careful", "autonomous", "reviewed", "strict"],
+      "description": "How often a person is asked to look too; every change gets one agent review. light: only for strong single signals (danger rules, Jev nearly sure of weakened access checks or data loss). balanced (default): High, or a strong single signal. careful: high-stakes code; wider Medium and High, and a person from Medium. autonomous, reviewed and strict are the earlier names of light, balanced and careful. The names match the Amp plugin's amp.brisk.preset."
     },
     "high_share": { "$ref": "#/$defs/share", "description": "Share of changes the model alone puts at High, through the calibration's risk quantiles" },
     "medium_share": { "$ref": "#/$defs/share", "description": "Share of changes the model alone puts at Medium or above" },
@@ -110,16 +110,27 @@
       "additionalProperties": false,
       "properties": { "low": { "type": "string" }, "medium": { "type": "string" }, "high": { "type": "string" } }
     },
-    "agent_review": {
+    "human_check": {
       "type": "object",
-      "description": "When to recommend an agent review. Any one condition is enough; a key left out keeps the preset's value.",
+      "description": "When to ask a person to look too. Any one condition is enough; a key left out keeps the preset's value.",
       "additionalProperties": false,
       "properties": {
-        "min_tier": { "enum": ["low", "medium", "high", "none"], "description": "Recommend at or above this tier; none turns the tier condition off" },
-        "min_uncertainty": { "type": "number", "minimum": 0, "maximum": 3, "description": "Recommend when Jev rates the change at least this weakly verified; 0 turns it off" },
-        "questions": { "type": "object", "additionalProperties": { "type": "number" }, "description": "Recommend when a yes/no answer reaches its minimum, such as weakens_auth: 0.5" },
-        "tailor_plan": { "enum": ["recommended", "always", "never"], "default": "recommended", "description": "When to ask the model to score the review plan, a second model call: only when a review is recommended (default), always, or never" },
-        "rules": { "type": "array", "items": { "type": "string" }, "description": "Recommend when any of these hit IDs fires" }
+        "min_tier": { "enum": ["low", "medium", "high", "none"], "description": "Ask at or above this tier; none turns the tier condition off" },
+        "min_uncertainty": { "type": "number", "minimum": 0, "maximum": 3, "description": "Ask when Jev rates the change at least this weakly verified; 0 turns it off" },
+        "questions": { "type": "object", "additionalProperties": { "type": "number" }, "description": "Ask when a yes/no answer reaches its minimum, such as weakens_auth: 0.5" },
+        "rules": { "type": "array", "items": { "type": "string" }, "description": "Ask when any of these hit IDs fires" }
+      }
+    },
+    "agent_review": {
+      "type": "object",
+      "description": "The agent review every change gets. min_tier, min_uncertainty, questions and rules are the earlier spelling of human_check's keys and still work; human_check's win.",
+      "additionalProperties": false,
+      "properties": {
+        "tailor_plan": { "enum": ["always", "needed", "recommended", "never"], "default": "always", "description": "When to ask the model to score the review plan, a second model call on the same state: always (default), needed (only when a person is asked; recommended is the earlier name), or never" },
+        "min_tier": { "enum": ["low", "medium", "high", "none"], "deprecated": true },
+        "min_uncertainty": { "type": "number", "minimum": 0, "maximum": 3, "deprecated": true },
+        "questions": { "type": "object", "additionalProperties": { "type": "number" }, "deprecated": true },
+        "rules": { "type": "array", "items": { "type": "string" }, "deprecated": true }
       }
     }
   }
