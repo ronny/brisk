@@ -23,6 +23,8 @@ type Policy struct {
 	Actions     map[risk.Tier]string
 	Review      ReviewPolicy
 	Questions   []CustomQuestion // the project's own yes/no questions
+	// ReviewChecks are the team's review areas, by project rule or question id.
+	ReviewChecks map[string]ReviewCheckConfig
 }
 
 // CustomQuestion is a project's own yes/no question, asked in the same
@@ -254,6 +256,23 @@ func ResolvePolicy(cfg risk.PolicyConfig) (Policy, error) {
 		}
 		p.Questions = append(p.Questions, c)
 	}
+	for id, c := range cfg.ReviewChecks {
+		if c.Area == "" || len(c.Area) > 60 {
+			return Policy{}, fmt.Errorf("review_checks %q: area must be 1-60 characters", id)
+		}
+		if len(c.Checks) == 0 || len(c.Checks) > 5 {
+			return Policy{}, fmt.Errorf("review_checks %q: give 1-5 checks", id)
+		}
+		for _, t := range c.Checks {
+			if t == "" || len(t) > 300 {
+				return Policy{}, fmt.Errorf("review_checks %q: each check must be 1-300 characters", id)
+			}
+		}
+		if p.ReviewChecks == nil {
+			p.ReviewChecks = map[string]ReviewCheckConfig{}
+		}
+		p.ReviewChecks[id] = ReviewCheckConfig{Area: c.Area, Checks: c.Checks}
+	}
 	if r := cfg.AgentReview; r != nil {
 		if r.MinTier != nil {
 			if *r.MinTier == "none" {
@@ -314,6 +333,20 @@ func (p Policy) CheckIDs(known map[string]bool, project []string) error {
 	if len(bad) > 0 {
 		sort.Strings(bad)
 		return fmt.Errorf("unknown rule ids %v in rule_tiers or agent_review.rules", bad)
+	}
+	for _, q := range p.Questions {
+		if known[q.ID] || slices.Contains(project, q.ID) {
+			return fmt.Errorf("question id %q is also a rule id; pick another", q.ID)
+		}
+	}
+	for id := range p.ReviewChecks {
+		if !slices.Contains(project, id) && !slices.ContainsFunc(p.Questions, func(q CustomQuestion) bool { return q.ID == id }) {
+			bad = append(bad, id)
+		}
+	}
+	if len(bad) > 0 {
+		sort.Strings(bad)
+		return fmt.Errorf("review_checks %v: keys must be ids of project rules or questions", bad)
 	}
 	return nil
 }

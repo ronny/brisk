@@ -59,6 +59,19 @@
         }
       }
     },
+    "review_checks": {
+      "type": "object",
+      "description": "A team's own review area for a project rule (sensitive_paths, content_rules) or question, keyed by its id. Used in agent_review.plan with source config in place of brisk's generic project-rule area.",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["area", "checks"],
+        "additionalProperties": false,
+        "properties": {
+          "area": { "type": "string", "minLength": 1, "maxLength": 60 },
+          "checks": { "type": "array", "minItems": 1, "maxItems": 5, "items": { "type": "string", "minLength": 1, "maxLength": 300 } }
+        }
+      }
+    },
     "preset": {
       "enum": ["autonomous", "reviewed", "strict"],
       "description": "autonomous: nobody reviews by hand; High (about 26% of changes in the evaluation) asks for an agent review. reviewed (default): human reviewers; the calibrated thresholds. strict: high-stakes code; wider Medium and High, and an agent review for every Medium or High change. The names match the Amp plugin's amp.brisk.preset."

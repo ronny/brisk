@@ -10,7 +10,7 @@ The overview shows the main components. Implementation details and the separate 
 
 ## Scope and status
 
-This snapshot includes policy presets, agent review, and project rules (`content_rules` and project `questions`) from the [core thread](https://ampcode.com/threads/T-01a1e74a-81c7-76ef-8fa3-ac7baacb2a0f). The overview shows the implemented MVP shape.
+This snapshot includes policy presets, agent review with its review plan, and project rules (`content_rules` and project `questions`) from the [core thread](https://ampcode.com/threads/T-01a1e74a-81c7-76ef-8fa3-ac7baacb2a0f). The overview shows the implemented MVP shape.
 Additional implementations are interface-only. The input box identifies untrusted evidence.
 
 | Part | MVP implementation | Extension boundary |
@@ -73,6 +73,7 @@ Base-commit `.brisk.yaml` controls policy. Its optional keys are:
 - `rule_tiers`: rule-specific tiers, applied before the engine computes the rule floor.
 - `actions`: action text for each tier.
 - `agent_review`: independent review conditions, with `min_tier`, `min_uncertainty`, `questions`, and `rules`.
+- `review_checks`: the team's own review area and checks for a project rule or question.
 
 Path and content rules hit as `config:<id>` and set the floor like built-in rules. A content rule matches one line at a time, so it is a tripwire, not a guarantee.
 Project questions have no calibration weight. Each one acts only through its `raise_to` override, so it can raise the model tier but never lower it. Without `raise_to`, the answer appears only in `provenance.answers`.
@@ -83,6 +84,8 @@ Review conditions are ORed. They use existing answers and rule hits, without ano
 
 Every assessment includes `agent_review: { recommended, reason }`, including the host request's `floor_assessment`.
 The recommendation is independent of the tier: Low or Medium can also warrant an agent review.
+`agent_review.plan` lists review areas with evidence and checks, most important first. Area and check text come from brisk's catalog or the base config's `review_checks`, never from the model.
+The model only scores each area 0–3, through optional host `review_questions` answered in a separate call. Low-scoring areas that no High rule or override requires are dropped. Without those answers the plan is brisk's full list.
 The recommendation does not perform review or prove approval.
 
 Policy provenance includes:

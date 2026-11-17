@@ -7,12 +7,26 @@
   "required": ["schema", "request_id", "model", "state", "questions", "floor_assessment"],
   "properties": {
     "schema": { "const": "brisk.host-request/v1" },
-    "request_id": { "type": "string", "description": "Hash of state, questions, base commit, and the whole diff; copy it into the answers" },
+    "request_id": { "type": "string", "description": "Hash of state, questions, review_questions, base commit, and the whole diff; copy it into the answers" },
     "model": { "type": "string", "description": "Decision model the calibration expects, e.g. \"typesafe/jev\"" },
     "state": { "description": "String or JSON object, at most 50,000 characters when serialised" },
     "questions": {
       "type": "object",
       "maxProperties": 20,
+      "additionalProperties": {
+        "type": "object",
+        "required": ["type", "instructions"],
+        "properties": {
+          "type": { "enum": ["noul", "score"] },
+          "instructions": {},
+          "criteria": {}
+        }
+      }
+    },
+    "review_questions": {
+      "type": "object",
+      "maxProperties": 8,
+      "description": "Optional. Score questions about the review plan's areas; answer them in a separate call on the same state and return them as review_answers. Absent when the plan is empty. The request_id covers them.",
       "additionalProperties": {
         "type": "object",
         "required": ["type", "instructions"],

@@ -150,17 +150,18 @@ func assessCmd(ctx context.Context, args []string, stdout, stderr io.Writer) (in
 	}
 
 	if hostRequest && p.Request != nil {
-		id, err := host.RequestID(*p.Request, p.Changes)
+		id, err := host.RequestID(*p.Request, p.ReviewQuestions, p.Changes)
 		if err != nil {
 			return 0, err
 		}
 		req := risk.HostRequest{
-			Schema:    risk.HostRequestSchema,
-			RequestID: id,
-			Model:     "typesafe/jev",
-			State:     p.Request.State,
-			Questions: p.Request.Questions,
-			Floor:     p.Finish("rules-only", nil, ""),
+			Schema:          risk.HostRequestSchema,
+			RequestID:       id,
+			Model:           "typesafe/jev",
+			State:           p.Request.State,
+			Questions:       p.Request.Questions,
+			ReviewQuestions: p.ReviewQuestions,
+			Floor:           p.Finish("rules-only", nil, ""),
 		}
 		return 0, writeJSON(stdout, req)
 	}
@@ -170,11 +171,12 @@ func assessCmd(ctx context.Context, args []string, stdout, stderr io.Writer) (in
 		if p.Request == nil {
 			return 0, fmt.Errorf("--answers given, but there is nothing to ask: the change is empty")
 		}
-		h.Change = p.Changes
+		h.Change, h.Review = p.Changes, p.ReviewQuestions
 		resp, err := backend.Answer(ctx, *p.Request)
 		if err != nil {
 			return 0, err
 		}
+		p.ReviewAnswers = h.ReviewAnswers()
 		a = p.Finish(backend.Name(), &resp, "")
 	} else {
 		a = p.Answer(ctx, backend)

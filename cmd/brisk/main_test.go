@@ -875,6 +875,7 @@ func TestProjectQuestions(t *testing.T) {
 		"questions:\n  - id: a_b\n    text: x?\n    min: 2\n":                "between 0 and 1",
 		"questions:\n  - id: Bad\n    text: x?\n":                            "lowercase",
 		"questions:\n  - id: size\n    text: x?\n":                           "already used",
+		"questions:\n  - id: auth\n    text: x?\n":                           "also a rule id",
 		"agent_review:\n  questions: {invoice_rounding_chaged: 0.5}\n":       "unknown question",
 		"questions:\n  - id: a_b\n    text: x?\n  - id: a_b\n    text: y?\n": "already used",
 	} {
@@ -885,5 +886,129 @@ func TestProjectQuestions(t *testing.T) {
 		if code, _, errs := runCLI(t, "assess", "--repo", dir, "--base", "HEAD"); code != 1 || !strings.Contains(errs, want) {
 			t.Errorf("config %q: exit %d, stderr %q, want %q", config, code, errs, want)
 		}
+	}
+}
+
+// The review plan comes from brisk's catalog and the team's review_checks.
+// Jev's scores in review_answers drop and reorder areas, but never drop a
+// required one; without review answers the full plan stays, not degraded.
+func TestReviewPlan(t *testing.T) {
+	dir := newRepo(t)
+	write(t, dir, ".brisk.yaml", `content_rules:
+  - id: invoice_rounding
+    paths: ["totals/**"]
+    pattern: 'math\.Round'
+    floor: medium
+    reason: Invoice rounding (FR-12).
+review_checks:
+  invoice_rounding:
+    area: Invoice rounding
+    checks: ["Confirm totals still use half-to-even rounding."]
+`)
+	git(t, dir, "add", "-A")
+	git(t, dir, "commit", "-q", "-m", "policy")
+	write(t, dir, "internal/client/client.go", "package client\n\nimport \"crypto/tls\"\n\nvar cfg = tls.Config{InsecureSkipVerify: true}\n")
+	write(t, dir, "db/migrations/003.sql", "ALTER TABLE users ADD COLUMN note text;\n")
+	write(t, dir, "totals/t.go", "package totals\n\nimport \"math\"\n\nvar r = math.Round(1.5)\n")
+	code, out, errs := runCLI(t, "assess", "--repo", dir, "--base", "HEAD", "--backend", "host", "--format", "json")
+	if code != 0 {
+		t.Fatal(errs)
+	}
+	var req risk.HostRequest
+	if err := json.Unmarshal([]byte(out), &req); err != nil {
+		t.Fatal(err)
+	}
+	ids := func(plan []risk.ReviewArea) []string {
+		var s []string
+		for _, a := range plan {
+			s = append(s, a.ID)
+		}
+		return s
+	}
+	plan := req.Floor.AgentReview.Plan
+	want := []string{"transport_security", "config_invoice_rounding", "stored_data"}
+	if !slices.Equal(ids(plan), want) {
+		t.Fatalf("floor plan %v, want %v", ids(plan), want)
+	}
+	if !plan[0].Required || plan[1].Required || plan[1].Source != "config" || plan[1].Checks[0].Text != "Confirm totals still use half-to-even rounding." || len(plan[0].Evidence) == 0 {
+		t.Fatalf("floor plan %+v", plan)
+	}
+	for _, a := range plan {
+		if _, ok := req.ReviewQuestions["review_"+a.ID]; !ok {
+			t.Fatalf("no review question for %s: %v", a.ID, req.ReviewQuestions)
+		}
+		if _, ok := req.Questions["review_"+a.ID]; ok {
+			t.Fatal("review questions must stay out of the calibrated questions")
+		}
+	}
+
+	answers := func(review map[string]float64) string {
+		ans := map[string]risk.Answer{}
+		for name, q := range req.Questions {
+			v := 0.0
+			if q.Type == "noul" {
+				ans[name] = risk.Answer{Type: "noul", Noul: &v}
+			} else {
+				ans[name] = risk.Answer{Type: "score", Score: &v}
+			}
+		}
+		var ra map[string]risk.Answer
+		if review != nil {
+			ra = map[string]risk.Answer{}
+			for q, v := range review {
+				ra[q] = risk.Answer{Type: "score", Score: &v}
+			}
+		}
+		b, _ := json.Marshal(risk.HostAnswers{Schema: risk.HostAnswersSchema, RequestID: req.RequestID, Model: "jev-1.14.0", Answers: ans, ReviewAnswers: ra})
+		p := filepath.Join(t.TempDir(), "a.json")
+		os.WriteFile(p, b, 0o644)
+		return p
+	}
+	// Required transport_security scores 0 but stays, first; stored_data
+	// below 1 is dropped; the project area outscores nothing else left.
+	a := assessJSON(t, "--repo", dir, "--base", "HEAD", "--answers", answers(map[string]float64{
+		"review_transport_security": 0, "review_stored_data": 0.4, "review_config_invoice_rounding": 2.5}))
+	if got := ids(a.AgentReview.Plan); !slices.Equal(got, []string{"transport_security", "config_invoice_rounding"}) {
+		t.Fatalf("tailored plan %v", got)
+	}
+	if rp := a.Provenance.ReviewPlan; rp == nil || !rp.Tailored || !slices.Equal(rp.Dropped, []string{"stored_data"}) || rp.Scores["stored_data"] != 0.4 {
+		t.Fatalf("review_plan provenance %+v", a.Provenance.ReviewPlan)
+	}
+	// Without review answers: the full plan, untailored, not degraded.
+	a = assessJSON(t, "--repo", dir, "--base", "HEAD", "--answers", answers(nil))
+	if !slices.Equal(ids(a.AgentReview.Plan), want) || a.Provenance.ReviewPlan.Tailored || a.Provenance.Degraded != "" {
+		t.Fatalf("untailored plan %v provenance %+v degraded %q", ids(a.AgentReview.Plan), a.Provenance.ReviewPlan, a.Provenance.Degraded)
+	}
+
+	// A project rule named "rule" keeps its own config area, and a file
+	// with line-level evidence is not also listed as a whole file.
+	write(t, dir, ".brisk.yaml", "sensitive_paths:\n  - id: rule\n    paths: [\"totals/**\"]\n    floor: medium\n  - id: other\n    paths: [\"totals/**\"]\n    floor: medium\nreview_checks:\n  rule:\n    area: Totals\n    checks: [Check totals.]\n")
+	git(t, dir, "add", "-A")
+	write(t, dir, "internal/auth/check.go", "package auth\n\nfunc CanEdit(user, owner int) bool {\n\tif user != owner {\n\t\treturn false\n\t}\n\treturn true\n}\n")
+	git(t, dir, "add", "-A")
+	git(t, dir, "commit", "-q", "-m", "rule")
+	write(t, dir, "internal/auth/check.go", "package auth\n\nfunc CanEdit(user, owner int) bool {\n\treturn true\n}\n")
+	write(t, dir, "totals/t.go", "package totals\n\nvar r = 2\n")
+	write(t, dir, "internal/client/client.go", "package client\n\nimport \"crypto/tls\"\n\nvar cfg = tls.Config{InsecureSkipVerify: false}\nvar cfg2 = tls.Config{InsecureSkipVerify: true}\n")
+	a = assessJSON(t, "--repo", dir, "--base", "HEAD")
+	if got := ids(a.AgentReview.Plan); !slices.Contains(got, "config_rule") || !slices.Contains(got, "project_rule") {
+		t.Fatalf("plan %v, want config_rule and project_rule apart", got)
+	}
+	for _, area := range a.AgentReview.Plan {
+		paths := map[string]bool{}
+		for _, e := range area.Evidence {
+			if paths[e.Path] && e.StartLine == 0 {
+				t.Fatalf("area %s lists %s as a whole file beside line evidence: %+v", area.ID, e.Path, area.Evidence)
+			}
+			paths[e.Path] = true
+		}
+	}
+
+	// review_checks must name a project rule or question.
+	write(t, dir, ".brisk.yaml", "review_checks:\n  auth:\n    area: X\n    checks: [y]\n")
+	git(t, dir, "add", "-A")
+	git(t, dir, "commit", "-q", "-m", "bad")
+	if code, _, errs := runCLI(t, "assess", "--repo", dir, "--base", "HEAD"); code != 1 || !strings.Contains(errs, "review_checks") {
+		t.Fatalf("bad review_checks: exit %d stderr %q", code, errs)
 	}
 }

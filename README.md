@@ -86,6 +86,24 @@ A content rule matches one line at a time, so it is a tripwire, not a guarantee:
 
 Test a project rule with a fixture in `testdata/fixtures/` (a base `.brisk.yaml`, base and head files, and the expected tier), or with a throwaway commit and `brisk assess --base HEAD`.
 
+### Review plan
+
+`agent_review.plan` tells a reviewing agent where to look and what to check, most important first. It is built whether or not a review is recommended. Each area comes from a rule hit or a model override that fired:
+
+- **Source `brisk`:** the area and check text come from brisk's fixed catalog, such as "Access checks: find or add a test that a caller without access is denied."
+- **Source `config`:** the area and checks come from the team's `review_checks` in `.brisk.yaml`, keyed by a project rule or question ID.
+
+Jev tailors the plan without writing any of it. The host request carries up to 8 `review_questions`, one 0–3 score per area. They are asked on the same state, in a call separate from the calibrated questions, so calibrated request keys and recordings don't change. An area that scores below 1 is dropped unless it is required, meaning a High rule or override produced it. The rest are ordered by score, and `provenance.review_plan` records the scores and the dropped areas. Without review answers the plan is brisk's full list, required areas first and then in hit order, and the assessment is not degraded. Asking the review questions costs a second model call on the same state.
+
+```yaml
+review_checks:
+  invoice_rounding:                 # a content_rules, sensitive_paths or questions id
+    area: Invoice rounding
+    checks:
+      - Confirm invoice totals still use half-to-even rounding.
+      - Find or add a test with a total ending in .5.
+```
+
 ## Documents
 
 | Schema | Go type |

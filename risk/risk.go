@@ -179,6 +179,35 @@ type Assessment struct {
 type AgentReview struct {
 	Recommended bool   `json:"recommended"`
 	Reason      string `json:"reason"`
+	// Plan lists where a reviewer should look and what to check, most
+	// important first. It is built whether or not a review is recommended.
+	Plan []ReviewArea `json:"plan"`
+}
+
+// ReviewArea is one part of a review plan. Area and check text come from
+// brisk's catalog (Source "brisk") or the base .brisk.yaml ("config"); the
+// model never writes it. Evidence paths and symbols are repository text.
+type ReviewArea struct {
+	ID       string        `json:"id"`
+	Area     string        `json:"area"`
+	Source   string        `json:"source"`
+	Required bool          `json:"required"`        // a High rule or override; never dropped
+	Score    *float64      `json:"score,omitempty"` // the model's 0-3 relevance, when tailored
+	Evidence []Evidence    `json:"evidence"`
+	Checks   []ReviewCheck `json:"checks"`
+}
+
+// ReviewCheck is one thing a reviewer should check.
+type ReviewCheck struct {
+	ID   string `json:"id"`
+	Text string `json:"text"`
+}
+
+// ReviewPlanProvenance records how the model tailored the review plan.
+type ReviewPlanProvenance struct {
+	Tailored bool               `json:"tailored"` // the model scored the areas
+	Scores   map[string]float64 `json:"scores"`
+	Dropped  []string           `json:"dropped"` // areas scored below 1, never required ones
 }
 
 // Stats summarises the size of the change.
@@ -207,24 +236,25 @@ type Evidence struct {
 
 // Provenance records what produced the assessment.
 type Provenance struct {
-	BriskVersion string             `json:"brisk_version"`
-	Backend      string             `json:"backend"`               // "openrouter", "host", "rules-only"
-	Model        string             `json:"model,omitempty"`       // exact version that answered
-	Calibration  string             `json:"calibration,omitempty"` // calibration table used
-	Preset       string             `json:"preset,omitempty"`      // policy preset from .brisk.yaml
-	Thresholds   map[string]float64 `json:"thresholds,omitempty"`  // model risk thresholds the policy used
-	PolicyNote   string             `json:"policy_note,omitempty"` // why the policy could not be applied in full
-	Degraded     string             `json:"degraded,omitempty"`    // why a backend fell back to rules only
-	Base         string             `json:"base"`
-	Head         string             `json:"head,omitempty"`
-	DiffHash     string             `json:"diff_hash"`
-	RuleHits     []string           `json:"rule_hits"`
-	Findings     []Finding          `json:"findings,omitempty"`
-	Answers      map[string]Answer  `json:"answers,omitempty"`
-	ModelRisk    *float64           `json:"model_risk,omitempty"` // combined 0–1 risk from the answers
-	Usage        *Usage             `json:"usage,omitempty"`
-	DurationMS   int64              `json:"duration_ms"`
-	Timings      map[string]float64 `json:"timings_ms,omitempty"`
+	BriskVersion string                `json:"brisk_version"`
+	Backend      string                `json:"backend"`               // "openrouter", "host", "rules-only"
+	Model        string                `json:"model,omitempty"`       // exact version that answered
+	Calibration  string                `json:"calibration,omitempty"` // calibration table used
+	Preset       string                `json:"preset,omitempty"`      // policy preset from .brisk.yaml
+	Thresholds   map[string]float64    `json:"thresholds,omitempty"`  // model risk thresholds the policy used
+	PolicyNote   string                `json:"policy_note,omitempty"` // why the policy could not be applied in full
+	ReviewPlan   *ReviewPlanProvenance `json:"review_plan,omitempty"`
+	Degraded     string                `json:"degraded,omitempty"` // why a backend fell back to rules only
+	Base         string                `json:"base"`
+	Head         string                `json:"head,omitempty"`
+	DiffHash     string                `json:"diff_hash"`
+	RuleHits     []string              `json:"rule_hits"`
+	Findings     []Finding             `json:"findings,omitempty"`
+	Answers      map[string]Answer     `json:"answers,omitempty"`
+	ModelRisk    *float64              `json:"model_risk,omitempty"` // combined 0–1 risk from the answers
+	Usage        *Usage                `json:"usage,omitempty"`
+	DurationMS   int64                 `json:"duration_ms"`
+	Timings      map[string]float64    `json:"timings_ms,omitempty"`
 }
 
 // ---------------------------------------------------------------------------
@@ -298,6 +328,9 @@ type HostRequest struct {
 	Model     string              `json:"model"`      // model the calibration expects, e.g. "typesafe/jev"
 	State     any                 `json:"state"`
 	Questions map[string]Question `json:"questions"`
+	// ReviewQuestions score the review plan's areas. Answer them in a
+	// separate call on the same state; they are optional.
+	ReviewQuestions map[string]Question `json:"review_questions,omitempty"`
 	// Floor is the rules-only result, so a harness can show something
 	// before it has answers or when answering fails.
 	Floor Assessment `json:"floor_assessment"`
@@ -310,6 +343,8 @@ type HostAnswers struct {
 	Model     string            `json:"model"` // exact version that answered, e.g. "jev-1.14.0"
 	Answers   map[string]Answer `json:"answers"`
 	Usage     *Usage            `json:"usage,omitempty"`
+	// ReviewAnswers answer the request's review_questions; optional.
+	ReviewAnswers map[string]Answer `json:"review_answers,omitempty"`
 }
 
 // ---------------------------------------------------------------------------
@@ -415,6 +450,15 @@ type PolicyConfig struct {
 	// Questions are the project's own yes/no questions, asked in the same
 	// model request as brisk's.
 	Questions []QuestionConfig `json:"questions,omitempty" yaml:"questions"`
+	// ReviewChecks gives a project rule or question its own review area,
+	// keyed by its id.
+	ReviewChecks map[string]ReviewChecksConfig `json:"review_checks,omitempty" yaml:"review_checks"`
+}
+
+// ReviewChecksConfig is a team's review area for a project rule or question.
+type ReviewChecksConfig struct {
+	Area   string   `json:"area" yaml:"area"`
+	Checks []string `json:"checks" yaml:"checks"`
 }
 
 // QuestionConfig is a project's own yes/no question for the model. With

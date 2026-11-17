@@ -18,10 +18,27 @@
     "agent_review": {
       "type": "object",
       "description": "Whether brisk recommends that a reviewing agent check the change before it ships. Separate from the tier: a Medium change can recommend one. Decided by the policy from the tier, rule hits, and Jev's answers.",
-      "required": ["recommended", "reason"],
+      "required": ["recommended", "reason", "plan"],
       "properties": {
         "recommended": { "type": "boolean" },
-        "reason": { "type": "string", "description": "One sentence of brisk's fixed text plus numbers; never an ID or text from the repository or its config. Empty when not recommended." }
+        "reason": { "type": "string", "description": "One sentence of brisk's fixed text plus numbers; never an ID or text from the repository or its config. Empty when not recommended." },
+        "plan": {
+          "type": "array",
+          "description": "Where a reviewer should look and what to check, most important first; built whether or not a review is recommended, and may be empty. Area and check text come from brisk's catalog (source brisk) or the base .brisk.yaml review_checks (source config); the model only scores areas. Evidence paths and symbols are repository text.",
+          "items": {
+            "type": "object",
+            "required": ["id", "area", "source", "required", "evidence", "checks"],
+            "properties": {
+              "id": { "type": "string" },
+              "area": { "type": "string" },
+              "source": { "enum": ["brisk", "config"] },
+              "required": { "type": "boolean", "description": "From a High rule or model override; never dropped by tailoring" },
+              "score": { "type": "number", "minimum": 0, "maximum": 3, "description": "The model's relevance score, when the plan was tailored" },
+              "evidence": { "type": "array", "items": { "type": "object", "required": ["path"], "properties": { "path": { "type": "string" }, "start_line": { "type": "integer" }, "end_line": { "type": "integer" }, "symbol": { "type": "string" } } } },
+              "checks": { "type": "array", "items": { "type": "object", "required": ["id", "text"], "properties": { "id": { "type": "string" }, "text": { "type": "string" } } } }
+            }
+          }
+        }
       }
     },
     "reasons": {
@@ -70,6 +87,16 @@
         "calibration": { "type": "string" },
         "preset": { "enum": ["autonomous", "reviewed", "strict"], "description": "Policy preset from the base commit's .brisk.yaml; reviewed when it names none" },
         "thresholds": { "type": "object", "description": "Model risk thresholds the policy used", "properties": { "medium": { "type": "number" }, "high": { "type": "number" } } },
+        "review_plan": {
+          "type": "object",
+          "description": "How the model tailored agent_review.plan; absent when the plan is empty.",
+          "required": ["tailored", "scores", "dropped"],
+          "properties": {
+            "tailored": { "type": "boolean", "description": "False when there were no review answers; the plan is then brisk's full list, required areas first, then in hit order" },
+            "scores": { "type": "object", "additionalProperties": { "type": "number" } },
+            "dropped": { "type": "array", "items": { "type": "string" }, "description": "Area IDs scored below 1; required areas are never dropped" }
+          }
+        },
         "policy_note": { "type": "string", "description": "Why the policy could not be applied in full, such as a share with no risk quantiles for this model; the tier then uses the calibration's thresholds. The model still answered." },
         "degraded": { "type": "string", "description": "Set when a model backend failed and brisk fell back to rules only" },
         "base": { "type": "string" },

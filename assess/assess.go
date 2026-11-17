@@ -50,9 +50,14 @@ type Prepared struct {
 	Floor     risk.Tier
 	Request   *risk.Request // nil when there is nothing to ask
 	RequestID string        // host.Key(Request): recorded answers are keyed by it
-	Policy    Policy
-	Timings   map[string]float64
-	started   time.Time
+	// ReviewQuestions score the review plan's areas, asked on the same
+	// state in a separate request so the calibrated request is unchanged.
+	ReviewQuestions map[string]risk.Question
+	// ReviewAnswers are the answers to ReviewQuestions, when there are any.
+	ReviewAnswers map[string]risk.Answer
+	Policy        Policy
+	Timings       map[string]float64
+	started       time.Time
 }
 
 // Prepare collects the change and everything rules can decide.
@@ -118,6 +123,7 @@ func (e *Engine) Prepare(ctx context.Context, in Input) (*Prepared, error) {
 			return nil, err
 		}
 		p.Request, p.RequestID = &req, id
+		p.ReviewQuestions = reviewQuestions(p.planCandidates())
 	}
 	return p, nil
 }
@@ -234,7 +240,20 @@ func (p *Prepared) Answer(ctx context.Context, b risk.Backend) risk.Assessment {
 		return p.Finish("rules-only", nil, "")
 	}
 	t := time.Now()
+	// The review questions go in their own call, in parallel; without
+	// their answers the plan is brisk's alone, which is not an error.
+	review := make(chan map[string]risk.Answer, 1)
+	go func() {
+		if rq := p.ReviewRequest(); rq != nil {
+			if r, err := b.Answer(ctx, *rq); err == nil {
+				review <- r.Answers
+				return
+			}
+		}
+		review <- nil
+	}()
 	resp, err := b.Answer(ctx, *p.Request)
+	p.ReviewAnswers = <-review
 	p.Timings["model"] = float64(time.Since(t).Microseconds()) / 1000
 	if err == risk.ErrNoModel {
 		return p.Finish("rules-only", nil, "")
@@ -243,6 +262,14 @@ func (p *Prepared) Answer(ctx context.Context, b risk.Backend) risk.Assessment {
 		return p.Finish("rules-only", nil, b.Name()+": "+err.Error())
 	}
 	return p.Finish(b.Name(), &resp, "")
+}
+
+// ReviewRequest is the request that scores the review plan, or nil.
+func (p *Prepared) ReviewRequest() *risk.Request {
+	if p.Request == nil || len(p.ReviewQuestions) == 0 {
+		return nil
+	}
+	return &risk.Request{State: p.Request.State, Questions: p.ReviewQuestions}
 }
 
 // History is the 0–1 history feature: prior fixes and reverts to the
@@ -354,6 +381,8 @@ func (p *Prepared) Finish(backend string, resp *risk.Response, degraded string) 
 		candidates = append(candidates, risk.Reason{Text: h.Text, Source: h.Source, ID: h.ID, Tier: h.Tier, Evidence: h.Evidence})
 	}
 
+	var firedIDs []string
+	firedTier := map[string]risk.Tier{}
 	if resp != nil {
 		a.Provenance.Model = resp.Model
 		a.Provenance.Answers = resp.Answers
@@ -377,6 +406,13 @@ func (p *Prepared) Finish(backend string, resp *risk.Response, degraded string) 
 			a.Uncertainty = round2(feats["uncertainty"] * 3)
 			modelTier, fired := ModelTier(table, r, resp.Answers)
 			a.Tier = risk.Max(p.Floor, modelTier)
+			for _, o := range fired {
+				t, _ := risk.ParseTier(o.Tier)
+				if _, ok := firedTier[o.Question]; !ok {
+					firedIDs = append(firedIDs, o.Question)
+				}
+				firedTier[o.Question] = risk.Max(firedTier[o.Question], t)
+			}
 			if modelTier > risk.Low {
 				for _, c := range modelReasons(table, feats, r, resp.Answers, fired, a.Stats) {
 					// Only a fired override speaks for a project question;
@@ -405,6 +441,11 @@ func (p *Prepared) Finish(backend string, resp *risk.Response, degraded string) 
 	}
 	a.Action = p.Policy.Actions[a.Tier]
 	a.AgentReview = p.Policy.AgentReview(a.Tier, a.Provenance.RuleHits, a.Provenance.Answers)
+	var review map[string]risk.Answer
+	if resp != nil {
+		review = p.ReviewAnswers
+	}
+	a.AgentReview.Plan, a.Provenance.ReviewPlan = p.buildPlan(firedIDs, firedTier, review)
 	a.Provenance.Preset = p.Policy.Preset
 	a.Provenance.DurationMS = time.Since(p.started).Milliseconds()
 	return a
