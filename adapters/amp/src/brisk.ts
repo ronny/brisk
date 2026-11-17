@@ -39,8 +39,16 @@ export interface ReviewArea {
 	checks: { id: string; text: string }[]
 }
 
+/** One question for the person human_check asks for; text from brisk's catalog or .brisk.yaml (config). */
+export interface Consider {
+	id: string
+	text: string
+	source: 'brisk' | 'config'
+	evidence?: Evidence[]
+}
+
 export interface Assessment {
-	schema: 'brisk.assessment/v1'
+	schema: 'brisk.assessment/v2'
 	tier: Tier
 	floor: Tier
 	impact: number
@@ -48,8 +56,10 @@ export interface Assessment {
 	action: string
 	reasons: Reason[]
 	stats: { files: number; additions: number; deletions: number }
-	/** Whether a further agent review is recommended, separate from the tier. Older binaries omit it. */
-	agent_review?: { recommended: boolean; reason: string; plan?: ReviewArea[]; context_files?: string[] }
+	/** Whether a person should look too, on top of the agent review every change gets. */
+	human_check?: { needed: boolean; why?: string; reason: string; consider?: Consider[] }
+	/** Guidance for the agent review every change gets. */
+	agent_review?: { plan?: ReviewArea[]; context_files?: string[] }
 	provenance: {
 		brisk_version: string
 		backend: 'openrouter' | 'host' | 'rules-only'
@@ -72,8 +82,8 @@ interface HostRequest {
 	questions: Record<string, unknown>
 	/** One relevance question per review area; answered separately, see README. */
 	review_questions?: Record<string, unknown>
-	/** When to answer review_questions: only once a review is recommended (default), or always. */
-	review_when?: 'recommended' | 'always'
+	/** When to answer review_questions: always (brisk's default), or only once a person is asked (needed). */
+	review_when?: 'needed' | 'always'
 	floor_assessment: Assessment
 }
 
@@ -141,7 +151,7 @@ function parse(stdout: string): Assessment | HostRequest {
 		throw new BriskError(`brisk printed something that is not JSON: ${stdout.slice(0, 200)}`)
 	}
 	const schema = (doc as { schema?: string })?.schema
-	if (schema !== 'brisk.assessment/v1' && schema !== 'brisk.host-request/v1') {
+	if (schema !== 'brisk.assessment/v2' && schema !== 'brisk.host-request/v1') {
 		throw new BriskError(`brisk printed an unknown document (schema ${JSON.stringify(schema)})`)
 	}
 	return doc as Assessment | HostRequest
@@ -164,17 +174,17 @@ export async function assess(o: RunOptions): Promise<RunResult> {
 		}
 		const backend = { amp: 'host', binary: 'auto', 'rules-only': 'rules-only' }[o.mode]
 		const first = parse(await exec(o.bin, [...args, '--backend', backend], o))
-		if (first.schema === 'brisk.assessment/v1') return { assessment: first }
+		if (first.schema === 'brisk.assessment/v2') return { assessment: first }
 		if (!o.decide) throw new BriskError('brisk asked questions but no decision model is available')
 
 		// The review questions (one relevance score per plan area) go in their
-		// own call so they cannot change the calibrated answers. With
-		// review_when "recommended" they are asked only when the answers lead to
-		// a recommended review; "always" asks them alongside the main call.
-		// Without their answers brisk keeps its full plan, so a failure is
-		// reported as review_error, not as an error.
+		// own call so they cannot change the calibrated answers. "always" asks
+		// them alongside the main call; with review_when "needed" (or a value
+		// this plugin does not know) they are asked only when the answers ask
+		// for a person. Without their answers brisk keeps its full plan, so a
+		// failure is reported as review_error, not as an error.
 		const decide = o.decide
-		const when = first.review_questions ? (first.review_when === 'always' ? 'always' : 'recommended') : undefined
+		const when = first.review_questions ? (first.review_when === 'always' ? 'always' : 'needed') : undefined
 		const askReview = (): Promise<{ answers?: Record<string, unknown>; error?: string }> => {
 			let timer: ReturnType<typeof setTimeout> | undefined
 			return Promise.race([
@@ -214,14 +224,14 @@ export async function assess(o: RunOptions): Promise<RunResult> {
 				}),
 			)
 			const doc = parse(await exec(o.bin, [...args, '--answers', f], o))
-			if (doc.schema !== 'brisk.assessment/v1') throw new BriskError('brisk asked questions again after answers')
+			if (doc.schema !== 'brisk.assessment/v2') throw new BriskError('brisk asked questions again after answers')
 			return doc
 		}
 		let final: Assessment
 		if (early) final = await finish(await early)
 		else {
 			final = await finish()
-			if (when === 'recommended' && final.agent_review?.recommended) {
+			if (when === 'needed' && final.human_check?.needed) {
 				// Tailoring is optional: if this run fails (for example brisk
 				// refuses because the files changed meanwhile), keep the
 				// assessment already made.

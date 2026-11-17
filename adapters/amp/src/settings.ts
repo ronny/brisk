@@ -11,12 +11,12 @@ import { delimiter, isAbsolute, join, relative, resolve } from 'node:path'
 import type { Mode } from './brisk.ts'
 
 /**
- * What the plugin does when brisk recommends an agent review, from least to
+ * How the plugin runs the one agent review every change gets, from least to
  * most automatic:
  * - off: nothing.
- * - suggest: a quick action and a line in the Ship prompt.
- * - once-before-ship: also makes sure one review ran on this version of the
- *   changes before Ship: the Ship turn runs it unless one already ran.
+ * - suggest: a quick action only.
+ * - once-before-ship (default): makes sure one review ran on this version of
+ *   the changes before Ship: the Ship turn runs it unless one already ran.
  * - before-ship: the Ship and Push to Branch turn always runs the review first.
  * - after-turn: also starts the review as soon as the agent's turn ends.
  */
@@ -24,19 +24,28 @@ export const REVIEW_MODES = ['off', 'suggest', 'once-before-ship', 'before-ship'
 export type ReviewMode = (typeof REVIEW_MODES)[number]
 
 /**
- * Plugin defaults per preset. The names match brisk's .brisk.yaml presets.
- * Explicit settings override them.
+ * What the plugin does when brisk asks for a person (human_check.needed):
+ * - dialog (default): label the thread brisk-needs-human and, before Ship, show
+ *   the questions in a dialog a person answers.
+ * - note: label it and put the questions in the Ship prompt, no dialog.
+ * - off: neither; the risk label only.
+ */
+export const ASK_PERSON = ['dialog', 'note', 'off'] as const
+export type AskPerson = (typeof ASK_PERSON)[number]
+
+/**
+ * Plugin defaults per preset. The names match brisk's .brisk.yaml presets;
+ * the earlier names are aliases. Explicit settings override them.
  */
 export const PRESETS: Record<string, { agentReview: ReviewMode; confirmShip: boolean }> = {
-	// Nobody reviews the agent's work, so the agent reviews it itself.
-	autonomous: { agentReview: 'after-turn', confirmShip: false },
-	// At least one agent review before Ship, wherever it ran; people review
-	// pull requests too.
-	reviewed: { agentReview: 'once-before-ship', confirmShip: false },
-	// Review before every risky Ship, and a person confirms High.
-	strict: { agentReview: 'before-ship', confirmShip: true },
+	// One agent review before Ship, wherever it ran; a person only when brisk asks.
+	light: { agentReview: 'once-before-ship', confirmShip: false },
+	balanced: { agentReview: 'once-before-ship', confirmShip: false },
+	// A review on every Ship, and a person confirms changes brisk could not assess.
+	careful: { agentReview: 'before-ship', confirmShip: true },
 }
-const DEFAULT_PRESET = 'reviewed'
+export const PRESET_ALIASES: Record<string, string> = { autonomous: 'light', reviewed: 'balanced', strict: 'careful' }
+const DEFAULT_PRESET = 'balanced'
 
 export interface Settings {
 	bin: string
@@ -44,19 +53,24 @@ export interface Settings {
 	base?: string
 	/** The trusted preset in effect. */
 	preset: string
-	/** Ask a person before Ship on High or unassessed changes in this project. */
+	/** Ask a person before Ship on changes brisk could not assess in this project. */
 	confirmShip: boolean
 	agentReview: ReviewMode
+	askPerson: AskPerson
+	/** When brisk asks for a person and nobody watches the thread: stop before pushing, or ship. */
+	unattended: 'stop' | 'ship'
+	/** Publish a "Brisk assessment" artifact in the thread after each assessment. */
+	artifact: boolean
 }
 
 /**
  * What a repository's preset (from its base .brisk.yaml, reported by brisk
- * as provenance.preset) raises agentReview to. reviewed is also what brisk
+ * as provenance.preset) raises agentReview to. balanced is also what brisk
  * reports when the file names no preset, so it raises nothing. A repository
  * cannot choose after-turn: it would let a cloned repository make the agent
  * start turns on its own.
  */
-export const PROJECT_RAISE: Record<string, ReviewMode> = { autonomous: 'once-before-ship', strict: 'before-ship' }
+export const PROJECT_RAISE: Record<string, ReviewMode> = { light: 'once-before-ship', careful: 'before-ship' }
 
 /**
  * reviewMode is what to do about a recommended agent review: the user's
@@ -64,7 +78,8 @@ export const PROJECT_RAISE: Record<string, ReviewMode> = { autonomous: 'once-bef
  * changed when the user turned agent review off.
  */
 export function reviewMode(cfg: Settings, projectPreset?: string): ReviewMode {
-	const project = projectPreset && Object.hasOwn(PROJECT_RAISE, projectPreset) ? PROJECT_RAISE[projectPreset] : undefined
+	const name = projectPreset && Object.hasOwn(PRESET_ALIASES, projectPreset) ? PRESET_ALIASES[projectPreset] : projectPreset
+	const project = name && Object.hasOwn(PROJECT_RAISE, name) ? PROJECT_RAISE[name] : undefined
 	if (!project || cfg.agentReview === 'off') return cfg.agentReview
 	return REVIEW_MODES.indexOf(project) > REVIEW_MODES.indexOf(cfg.agentReview) ? project : cfg.agentReview
 }
@@ -164,11 +179,14 @@ export async function resolveBinary(bin: string, root: string, path = process.en
  *
  * - amp.brisk.binary: a bare command name looked up on PATH, or an absolute
  *   (or ~/) path outside the project. Anything else falls back to `brisk`.
- * - amp.brisk.preset: autonomous, reviewed (default), or strict; sets the
- *   defaults of the two keys below.
- * - amp.brisk.confirmShipOnHigh: true for every project, false, or a list of
- *   project roots to turn it on for.
+ * - amp.brisk.preset: light, balanced (default), or careful (or the earlier
+ *   autonomous, reviewed, strict); sets the defaults of the next two keys.
+ * - amp.brisk.confirmUnassessed (earlier amp.brisk.confirmShipOnHigh): true
+ *   for every project, false, or a list of project roots to turn it on for.
  * - amp.brisk.agentReview: one of REVIEW_MODES.
+ * - amp.brisk.askPerson: one of ASK_PERSON.
+ * - amp.brisk.unattended: stop (default) or ship.
+ * - amp.brisk.artifact: false stops the "Brisk assessment" artifact.
  */
 export function settingsFrom(
 	c: Record<string, unknown>,
@@ -196,8 +214,10 @@ export function settingsFrom(
 						? 'binary'
 						: 'amp'
 
-	const preset = Object.hasOwn(PRESETS, str('preset') ?? '') ? str('preset')! : DEFAULT_PRESET
-	const confirm = c['amp.brisk.confirmShipOnHigh']
+	const named = str('preset') ?? ''
+	const alias = Object.hasOwn(PRESET_ALIASES, named) ? PRESET_ALIASES[named] : named
+	const preset = Object.hasOwn(PRESETS, alias) ? alias : DEFAULT_PRESET
+	const confirm = c['amp.brisk.confirmUnassessed'] ?? c['amp.brisk.confirmShipOnHigh']
 	const confirmShip =
 		confirm === undefined
 			? PRESETS[preset].confirmShip
@@ -206,5 +226,8 @@ export function settingsFrom(
 					confirm.some((p) => typeof p === 'string' && real(p.startsWith('~/') ? join(home, p.slice(2)) : p) === real(root)))
 	const review = str('agentReview')
 	const agentReview = (REVIEW_MODES as readonly string[]).includes(review ?? '') ? (review as ReviewMode) : PRESETS[preset].agentReview
-	return { bin, mode, base: str('base'), preset, confirmShip, agentReview }
+	const ask = str('askPerson')
+	const askPerson = (ASK_PERSON as readonly string[]).includes(ask ?? '') ? (ask as AskPerson) : 'dialog'
+	const unattended = str('unattended') === 'ship' ? 'ship' : 'stop'
+	return { bin, mode, base: str('base'), preset, confirmShip, agentReview, askPerson, unattended, artifact: c['amp.brisk.artifact'] !== false }
 }

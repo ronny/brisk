@@ -1,20 +1,32 @@
-// brisk for Amp: rates the risk of a thread's code changes with the brisk
-// binary and shows it as a thread label, a quick action, and a line in the
-// Ship prompt. Advisory unless the user turns on brisk.confirmShipOnHigh for
-// a project. Settings come only from user and managed settings files; see
-// src/settings.ts.
+// brisk for Amp: every change gets one agent review, guided by brisk's plan;
+// brisk decides whether a person should look too. The plugin labels the
+// thread (brisk-risk-<tier>, plus brisk-needs-human), runs the review before Ship, and asks
+// a person the questions brisk lists in a dialog before Ship. Settings come
+// only from user and managed settings files; see src/settings.ts.
 
 import type { PluginAPI, PluginThread, QuickAction } from '@ampcode/plugin'
+import { publishAssessment, type Tools } from './src/artifact.ts'
 import { assess, type Decide, type RunResult } from './src/brisk.ts'
-import { agentReviewMessage, labelsFor, reviewLine, reviewMessage, reviewRecommended, shipGate, shipLine, summary, unknownLine } from './src/present.ts'
+import {
+	agentReviewMessage,
+	humanDialog,
+	humanLine,
+	labelsFor,
+	needsHuman,
+	REVIEW_PREFIX,
+	reviewMessage,
+	reviewWanted,
+	shipLine,
+	summary,
+	unassessedGate,
+	unattendedNote,
+	unknownLine,
+} from './src/present.ts'
 import { buildSession, readTranscript, turnsFromMessages } from './src/session.ts'
-import { PROJECT_RAISE, readTrusted, resolveBinary, reviewMode, settingsFrom, type ReviewMode } from './src/settings.ts'
+import { readTrusted, resolveBinary, reviewMode, settingsFrom, type AskPerson, type ReviewMode } from './src/settings.ts'
 
 export const description =
-	"Rates how risky the thread's code changes are (Low, Medium, High) with brisk, and whether an agent review is recommended. Labels the thread, adds review quick actions, notes the risk in the Ship prompt, and can run the agent review automatically."
-
-/** Every agent review message starts with this; see agentReviewMessage. */
-const REVIEW_PREFIX = 'brisk recommends an agent review'
+	"Runs one agent review of the thread's code changes before Ship, guided by brisk, and asks a person to look too when brisk says so, with the questions to think about. Labels the thread brisk-risk-low, -medium or -high, plus brisk-needs-human, and keeps a Brisk assessment artifact in the thread."
 
 /** A run's result, or why it failed. */
 type Outcome = RunResult | { error: string }
@@ -58,6 +70,7 @@ export default function (amp: PluginAPI) {
 		thread: PluginThread,
 		decide: Decide,
 		log: (...a: unknown[]) => void,
+		tools?: Tools,
 	): Promise<Outcome | undefined> {
 		if (!root) return undefined
 		const s = state(thread.id)
@@ -80,8 +93,13 @@ export default function (amp: PluginAPI) {
 				const bin = await resolveBinary(cfg.bin, root)
 				const result = await assess({ bin, cwd: root, mode: cfg.mode, base: cfg.base, session, decide })
 				if (s.epoch === epoch) s.result = result
-				await show(thread, s, result, reviewMode(cfg, result.assessment.provenance.preset)).catch((e) => log(`brisk: could not show the result: ${e instanceof Error ? e.message : String(e)}`))
-				log(`brisk: ${summary(result.assessment, result.degraded)}`)
+				await show(thread, s, result, reviewMode(cfg, result.assessment.provenance.preset), cfg.askPerson).catch((e) => log(`brisk: could not show the result: ${e instanceof Error ? e.message : String(e)}`))
+				// The binary's version, so a result can be traced to the release that made it.
+				log(`brisk ${result.assessment.provenance.brisk_version}: ${summary(result.assessment, result.degraded)}`)
+				if (tools && cfg.artifact && s.epoch === epoch)
+					await publishAssessment(tools, result.assessment, result.degraded, new Date()).catch((e) =>
+						log(`brisk: could not publish the assessment artifact: ${e instanceof Error ? e.message : String(e)}`),
+					)
 				return result
 			} catch (e) {
 				const error = e instanceof Error ? e.message : String(e)
@@ -107,9 +125,9 @@ export default function (amp: PluginAPI) {
 		return p
 	}
 
-	async function show(thread: PluginThread, s: ThreadState, r: RunResult, mode: ReviewMode) {
+	async function show(thread: PluginThread, s: ThreadState, r: RunResult, mode: ReviewMode, ask: AskPerson) {
 		const a = r.assessment
-		if (mode !== 'off' && reviewRecommended(a)) {
+		if (mode !== 'off' && reviewWanted(a)) {
 			const def = { text: 'Start agent review', icon: 'sparkles' as const, action: 'send-message' as const, args: { message: agentReviewMessage(a) } }
 			if (s.reviewAction) s.reviewAction.update(def)
 			else s.reviewAction = thread.createQuickAction(def)
@@ -119,7 +137,7 @@ export default function (amp: PluginAPI) {
 			s.reviewAction = undefined
 			s.reviewOffered = undefined
 		}
-		await thread.setLabels(labelsFor(await thread.labels(), a.tier))
+		await thread.setLabels(labelsFor(await thread.labels(), a.tier, ask !== 'off' && needsHuman(a)))
 		// Amp shows 5 quick actions per thread across plugins; the agent review
 		// covers what "Review risky changes" would ask.
 		if (a.tier === 'low' || a.reasons.length === 0 || s.reviewAction) {
@@ -158,8 +176,8 @@ export default function (amp: PluginAPI) {
 		if (!touched && s.result) return
 		const turn = s.turn
 		const epoch = s.epoch
-		const r = await run(ctx.thread, (req) => ctx.ai.decide(req as Parameters<typeof ctx.ai.decide>[0]), ctx.logger.log)
-		if (!r || 'error' in r || !reviewRecommended(r.assessment)) return
+		const r = await run(ctx.thread, (req) => ctx.ai.decide(req as Parameters<typeof ctx.ai.decide>[0]), ctx.logger.log, ctx.tools)
+		if (!r || 'error' in r || !reviewWanted(r.assessment)) return
 		// after-turn: start the review now, once per version of the changes,
 		// and never right after a review turn, so reviews cannot loop.
 		const a = r.assessment
@@ -177,11 +195,11 @@ export default function (amp: PluginAPI) {
 		const inFlight = s.pending ?? s.running
 		const r = inFlight
 			? await inFlight
-			: (s.result ?? (await run(ctx.thread, (req) => ctx.ai.decide(req as Parameters<typeof ctx.ai.decide>[0]), ctx.logger.log)))
+			: (s.result ?? (await run(ctx.thread, (req) => ctx.ai.decide(req as Parameters<typeof ctx.ai.decide>[0]), ctx.logger.log, ctx.tools)))
 		if (!r) return undefined
 		if ('error' in r) return { append: unknownLine(r.error) }
-		const mode = reviewMode(await settings(), r.assessment.provenance.preset)
-		const lines = [shipLine(r.assessment, r.degraded), mode === 'off' ? undefined : reviewLine(r.assessment)].filter(Boolean)
+		const cfg = await settings()
+		const lines = [shipLine(r.assessment, r.degraded), cfg.askPerson === 'off' ? undefined : humanLine(r.assessment)].filter(Boolean)
 		return lines.length ? { append: lines.join(' ') } : undefined
 	})
 
@@ -197,21 +215,21 @@ export default function (amp: PluginAPI) {
 		if (!event.changesWorkflow) return {}
 		const cfg = await settings()
 		// The project's preset can only turn before-ship on, so look at the
-		// assessment unless the user turned agent review off entirely.
-		if (!cfg.confirmShip && cfg.agentReview === 'off') return {}
+		// assessment unless the user turned everything off.
+		if (!cfg.confirmShip && cfg.agentReview === 'off' && cfg.askPerson === 'off') return {}
 		// Always a fresh assessment: files may have changed outside a turn,
 		// and whether a review already covers them depends on the diff hash.
-		const r = await run(ctx.thread, (req) => ctx.ai.decide(req as Parameters<typeof ctx.ai.decide>[0]), ctx.logger.log)
+		const r = await run(ctx.thread, (req) => ctx.ai.decide(req as Parameters<typeof ctx.ai.decide>[0]), ctx.logger.log, ctx.tools)
 		// before-ship (or after-turn, when the review has not run yet for
 		// this version): the Ship turn runs the review before pushing.
 		let review: { message: { content: string; display: boolean } } | {} = {}
 		let reviewing: string | undefined
-		if (r && !('error' in r) && reviewRecommended(r.assessment)) {
+		if (r && !('error' in r) && reviewWanted(r.assessment)) {
 			const mode = reviewMode(cfg, r.assessment.provenance.preset)
 			const preset = r.assessment.provenance.preset ?? ''
-			// before-ship reviews on every Ship; a strict repository asks for
+			// before-ship reviews on every Ship; a careful repository asks for
 			// that even when the user chose after-turn, which ranks above it.
-			const always = mode === 'before-ship' || (mode !== 'off' && Object.hasOwn(PROJECT_RAISE, preset) && PROJECT_RAISE[preset] === 'before-ship')
+			const always = mode === 'before-ship' || (mode !== 'off' && reviewMode({ ...cfg, agentReview: 'suggest' }, preset) === 'before-ship')
 			if (always || (mode !== 'suggest' && mode !== 'off' && s.autoReviewed !== r.assessment.provenance.diff_hash)) {
 				reviewing = r.assessment.provenance.diff_hash
 				review = { message: { content: `Before pushing: ${agentReviewMessage(r.assessment)} Stop before pushing if it finds a blocker you cannot fix.`, display: true } }
@@ -223,22 +241,37 @@ export default function (amp: PluginAPI) {
 			s.reviewStarted = reviewing
 			s.reviewTurn = s.turn
 		}
-		const ask = cfg.confirmShip && r ? shipGate(true, r) : undefined
-		if (!ask) {
+		const withReview = (note?: string) => {
 			reviewed()
-			return review
+			if (!note) return review
+			const content = 'message' in review ? `${review.message.content}\n\n${note}` : note
+			return { message: { content, display: true } }
 		}
+		if (!r) return withReview()
+		if ('error' in r) {
+			const gate = unassessedGate(cfg.confirmShip, r)
+			if (gate && !(await ctx.ui.confirm({ ...gate, confirmButtonText: 'Ship anyway', requireHuman: true }))) {
+				await ctx.thread.cancel()
+				return {}
+			}
+			return withReview()
+		}
+		if (!needsHuman(r.assessment) || cfg.askPerson !== 'dialog') return withReview()
+		// A person answers; when nobody watches the thread the dialog is
+		// skipped and the Ship turn stops before pushing (or ships, if the
+		// user chose that) and leaves the questions in its reply.
 		const ok = await ctx.ui.confirm({
-			...ask,
-			confirmButtonText: 'Ship anyway',
+			...humanDialog(r.assessment, r.degraded),
+			confirmButtonText: "I've thought about it, ship",
 			requireHuman: true,
+			skipIfUnwatched: true,
 		})
-		if (!ok) {
+		if (ok === false) {
 			await ctx.thread.cancel()
 			return {}
 		}
-		reviewed()
-		return review
+		if (ok === undefined) return withReview(unattendedNote(r.assessment, cfg.unattended === 'ship'))
+		return withReview()
 	})
 
 	amp.registerCommand(
@@ -250,7 +283,7 @@ export default function (amp: PluginAPI) {
 				return
 			}
 			const thread = ctx.thread
-			const r = await run(thread, (req) => ctx.ai.decide({ ...(req as Parameters<typeof ctx.ai.decide>[0]), threadID: thread.id }), amp.logger.log)
+			const r = await run(thread, (req) => ctx.ai.decide({ ...(req as Parameters<typeof ctx.ai.decide>[0]), threadID: thread.id }), amp.logger.log, ctx.tools)
 			await ctx.ui.notify(!r ? 'brisk: no workspace to assess.' : 'error' in r ? `brisk: assessment failed: ${r.error}` : summary(r.assessment, r.degraded))
 		},
 	)
