@@ -118,6 +118,23 @@ func IsGenerated(p string) bool {
 		strings.Contains(p, "/gen/") || strings.HasPrefix(p, "gen/") || strings.HasSuffix(b, ".snap") || strings.HasSuffix(b, ".min.js")
 }
 
+// secretRe matches values that look like secrets.
+var secretRe = regexp.MustCompile(`(AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY-----|\bsk-(live|proj|or-v1)?-?[A-Za-z0-9]{24,}|\bgh[pousr]_[A-Za-z0-9]{36}|\bxox[abprs]-[A-Za-z0-9-]{10,}|\bsk_live_[A-Za-z0-9]{16,})`)
+
+// RedactSecrets replaces each value the secret_added rule would match
+// with "[redacted secret]".
+func RedactSecrets(s string) string {
+	return secretRe.ReplaceAllString(s, "[redacted secret]")
+}
+
+// credentialFiles are files whose values are all secrets, such as .env
+// files and keys; secrets_config also matches code about secrets.
+var credentialFiles = globs("**/.env", "**/.env.*", "**/fnox.toml", "**/*.pem", "**/*.key", "**/secrets.y*ml", "**/*.secrets.*")
+
+// IsCredentialFile reports whether p holds credentials, so its contents
+// should not leave the machine.
+func IsCredentialFile(p string) bool { return credentialFiles(p) }
+
 var codeOnly = func(p string) bool { return !IsTest(p) && !IsDoc(p) && !IsGenerated(p) }
 
 var builtinPathRules = []pathRule{
@@ -158,7 +175,7 @@ var builtinPathRules = []pathRule{
 	},
 	{
 		id: "secrets_config", tier: risk.Medium, text: "Changes secret or credential configuration",
-		match:  anyOf(globs("**/.env", "**/.env.*", "**/fnox.toml", "**/*.pem", "**/*.key", "**/secrets.y*ml", "**/*.secrets.*"), segs("secrets?", "credentials?")),
+		match:  anyOf(credentialFiles, segs("secrets?", "credentials?")),
 		ignore: func(fc risk.FileChange) bool { return IsDoc(fc.Path) || IsTest(fc.Path) },
 	},
 	{
@@ -188,7 +205,7 @@ var builtinLineRules = []lineRule{
 	},
 	{
 		id: "secret_added", tier: risk.High, text: "Adds what looks like a secret", inComments: true,
-		re:    regexp.MustCompile(`(AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY-----|\bsk-(live|proj|or-v1)?-?[A-Za-z0-9]{24,}|\bgh[pousr]_[A-Za-z0-9]{36}|\bxox[abprs]-[A-Za-z0-9-]{10,}|\bsk_live_[A-Za-z0-9]{16,})`),
+		re:    secretRe,
 		paths: func(p string) bool { return !IsDoc(p) },
 	},
 	{
@@ -291,7 +308,7 @@ func Apply(cs *risk.ChangeSet, findings []risk.Finding, session *risk.Session, c
 	if session != nil {
 		if c, ok := lastVerification(session); ok && c.ExitCode != nil && *c.ExitCode != 0 {
 			add("session:verification_failed", risk.Medium,
-				fmt.Sprintf("The last check the agent ran failed: %s", truncate(c.Command, 80)), "session", risk.Evidence{})
+				fmt.Sprintf("The last check the agent ran failed: %s", truncate(RedactSecrets(c.Command), 80)), "session", risk.Evidence{})
 		}
 	}
 

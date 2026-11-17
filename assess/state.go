@@ -3,6 +3,7 @@ package assess
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -40,7 +41,7 @@ func buildState(cs *risk.ChangeSet, findings []risk.Finding, hits []rules.Hit, p
 	if session != nil && session.Intent != "" {
 		task = session.Intent
 	}
-	st.Task = clip(task, 1500)
+	st.Task = clip(rules.RedactSecrets(task), 1500)
 
 	tags := map[string][]string{}
 	for _, h := range hits {
@@ -86,7 +87,7 @@ func buildState(cs *risk.ChangeSet, findings []risk.Finding, hits []rules.Hit, p
 		if f.StartLine > 0 {
 			loc = fmt.Sprintf("%s:%d", f.Path, f.StartLine)
 		}
-		st.Structural = append(st.Structural, fmt.Sprintf("%s: %s (%s)", loc, clip(f.Detail, 200), f.Kind))
+		st.Structural = append(st.Structural, fmt.Sprintf("%s: %s (%s)", loc, clip(rules.RedactSecrets(f.Detail), 200), f.Kind))
 	}
 
 	st.Verification = verification(cs, session)
@@ -142,7 +143,7 @@ func verification(cs *risk.ChangeSet, session *risk.Session) []string {
 			res = fmt.Sprintf("exit %d", *c.ExitCode)
 		}
 		if len(out) < 12 {
-			out = append(out, fmt.Sprintf("Ran `%s`: %s", clip(c.Command, 120), res))
+			out = append(out, fmt.Sprintf("Ran `%s`: %s", clip(rules.RedactSecrets(c.Command), 120), res))
 		}
 	}
 	if ran == 0 {
@@ -167,18 +168,41 @@ func priority(f risk.FileChange, tags map[string][]string) int {
 	return p
 }
 
+// fileDiff is f's diff for the model, with secrets redacted before any
+// clipping so no part of one is sent. Credential files and files holding a
+// private key on either side are left out entirely. Files too large to
+// load still drop the lines between a key's BEGIN and END lines.
 func fileDiff(f risk.FileChange) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "--- %s (%s)\n", f.Path, f.Status)
+	if rules.IsCredentialFile(f.Path) || privateKey.Match(f.Old) || privateKey.Match(f.New) {
+		b.WriteString("[credential file: contents not sent]\n")
+		return b.String()
+	}
+	inKey := false
 	for _, h := range f.Hunks {
 		fmt.Fprintf(&b, "@@ -%d,%d +%d,%d @@\n", h.OldStart, h.OldLines, h.NewStart, h.NewLines)
 		for _, l := range h.Lines {
+			switch {
+			case strings.Contains(l, "PRIVATE KEY-----") && strings.Contains(l, "-----BEGIN"):
+				inKey = !strings.Contains(l, "-----END")
+				l = rules.RedactSecrets(l)
+			case inKey:
+				if strings.Contains(l, "-----END") {
+					inKey = false
+				}
+				l = l[:min(1, len(l))] + "[redacted private key]"
+			default:
+				l = rules.RedactSecrets(l)
+			}
 			b.WriteString(clip(l, 300))
 			b.WriteByte('\n')
 		}
 	}
 	return b.String()
 }
+
+var privateKey = regexp.MustCompile(`-----BEGIN [A-Z ]*PRIVATE KEY-----`)
 
 func clip(s string, n int) string {
 	if len(s) <= n {

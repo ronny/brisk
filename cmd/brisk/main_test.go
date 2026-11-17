@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -275,5 +276,53 @@ func TestGitattributesCannotHideCode(t *testing.T) {
 	git(t, dir, "commit", "-q", "-m", "drop")
 	if a := assessJSON(t, "--repo", dir, "--base", "HEAD~1", "--head", "HEAD"); a.Floor != risk.High {
 		t.Fatalf("commits: floor %s hits %v, want high from destructive_sql", a.Floor, a.Provenance.RuleHits)
+	}
+}
+
+// Secrets the rules detect never reach the model: not in added, removed,
+// or context lines, not split by clipping, not in a key body, a credential
+// file, or the session's intent.
+func TestSecretsAreRedactedFromModelState(t *testing.T) {
+	aws := "AKIA" + strings.Repeat("Q", 16)
+	gh := "ghp_" + strings.Repeat("x", 36)
+	keyBody := "MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC7"
+	envValue := "hunter2-database-password"
+	dir := newRepo(t)
+	write(t, dir, "client.py", "old = \""+gh+"\"\nkeep = 1\n")
+	keyLines := "-----BEGIN OPENSSH PRIVATE KEY-----\n"
+	for i := range 10 {
+		keyLines += fmt.Sprintf("BODYLINE%02d%s\n", i, keyBody)
+	}
+	write(t, dir, "deploy_id_rsa", keyLines+"-----END OPENSSH PRIVATE KEY-----\n")
+	git(t, dir, "add", "-A")
+	git(t, dir, "commit", "-q", "-m", "client")
+	write(t, dir, "client.py", "pad = \""+strings.Repeat(" ", 290)+aws+"\"\nkeep = 1\n")
+	write(t, dir, "key.go", "package x\n\nconst k = `-----BEGIN RSA PRIVATE KEY-----\n"+keyBody+"\n-----END RSA PRIVATE KEY-----`\n")
+	write(t, dir, ".env", "DB_PASSWORD="+envValue+"\n")
+	// A key on one JSON line, and an edit in the middle of a key file.
+	write(t, dir, "sa.json", `{"private_key":"-----BEGIN PRIVATE KEY-----\nJSONBODY`+keyBody+`\n-----END PRIVATE KEY-----\n"}`+"\n")
+	write(t, dir, "deploy_id_rsa", strings.Replace(keyLines, "BODYLINE05", "EDITED05", 1)+"-----END OPENSSH PRIVATE KEY-----\n")
+	session := filepath.Join(t.TempDir(), "session.json")
+	write(t, filepath.Dir(session), "session.json", `{"intent": "use key `+aws+`"}`)
+
+	code, out, errs := runCLI(t, "assess", "--repo", dir, "--base", "HEAD", "--backend", "host", "--session", session, "--format", "json")
+	if code != 0 {
+		t.Fatalf("exit %d: %s", code, errs)
+	}
+	var req risk.HostRequest
+	if err := json.Unmarshal([]byte(out), &req); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(req.Floor.Provenance.RuleHits, "secret_added") {
+		t.Fatalf("hits %v, want secret_added", req.Floor.Provenance.RuleHits)
+	}
+	state, _ := json.Marshal(req.State)
+	for name, leak := range map[string]string{"AWS key": aws, "AWS key prefix": aws[:12], "removed GitHub token": gh, "private key body": keyBody, "one-line JSON key": "JSONBODY", "edited key file": "BODYLINE0", ".env value": envValue} {
+		if strings.Contains(string(state), leak) {
+			t.Errorf("%s reached the model state", name)
+		}
+	}
+	if !strings.Contains(string(state), "[redacted secret]") || !strings.Contains(string(state), "keep = 1") {
+		t.Errorf("state should keep the code around a redacted secret:\n%s", state)
 	}
 }
