@@ -1,0 +1,15 @@
+{
+  "name": "brisk-amp",
+  "private": true,
+  "type": "module",
+  "description": "Amp plugin that rates the risk of a thread's code changes with the brisk binary.",
+  "scripts": {
+    "test": "bun test",
+    "check": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@ampcode/plugin": "0.0.0-20261117001159-g1339445",
+    "@types/bun": "1.3.3",
+    "typescript": "5.9.3"
+  }
+}
