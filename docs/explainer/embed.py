@@ -62,6 +62,7 @@ for key, title, message in CASES:
             "impact": final["impact"],
             "uncertainty": final["uncertainty"],
             "action": final["action"],
+            "human_check": final.get("human_check"),
             "agent_review": final.get("agent_review"),
             "reasons": final["reasons"],
             "stats": final["stats"],
@@ -73,8 +74,8 @@ for key, title, message in CASES:
         "text": (out / f"{key}.final.txt").read_text(),
         # The same answers scored under each preset.
         "presets": {
-            p: {k: a.get(k) for k in ("tier", "floor", "action", "agent_review")} | {"thresholds": a["provenance"].get("thresholds")}
-            for p in ("autonomous", "reviewed", "strict")
+            p: {k: a.get(k) for k in ("tier", "floor", "action", "human_check", "agent_review")} | {"thresholds": a["provenance"].get("thresholds")}
+            for p in ("light", "balanced", "careful")
             if (f := out / f"{key}.{p}.json").exists() and (a := json.loads(f.read_text()))
         },
         # Assessed with the project's own rules (project-rules.brisk.yaml).

@@ -190,10 +190,10 @@ PROJECT="$HERE/project-rules.brisk.yaml"
 # Phase 1 (default): host requests and rules-only. Phase 2 (PHASE=2): final
 # assessments from answers written by the brisk_decide_batch plugin tool.
 #
-# Like the Amp plugin, the review plan's questions (review_when: recommended)
-# are asked only when the assessment from the main answers recommends an
-# agent review. Phase 2 then appends those requests (key <case>#review) to
-# req.jsonl and stops; answer them and run phase 2 again.
+# Every change gets an agent review, so by default (review_when: always) the
+# review plan's questions are answered with the main ones. Phase 2 appends
+# those requests (key <case>#review) to req.jsonl and stops; answer them and
+# run phase 2 again.
 if [ "${PHASE:-1}" = 1 ]; then
   : > "$OUT/req.jsonl"
   for c in $CASES; do
@@ -217,13 +217,14 @@ else
   }
   has_answer() { jq -e -s --arg k "$1" 'any(.[]; .key==$k and (.error|not))' "$OUT/ans.jsonl" >/dev/null; }
   pending=0
-  # score OUTFILE KEY HOSTFILE [brisk flags...]: score with the main answers;
-  # when that recommends a review, rescore with the review answers too.
+  # score OUTFILE KEY HOSTFILE [brisk flags...]: score with the main answers
+  # and, when the request carries review questions (review_when: always, the
+  # default, or needed once human_check asks for a person), the review answers too.
   score() {
     local outf=$1 key=$2 host=$3; shift 3
     answers "$key" > "$OUT/tmp.answers.json"
     "$BRISK" "${common[@]}" "$@" --answers "$OUT/tmp.answers.json" --format json > "$outf"
-    if jq -e '.agent_review.recommended' "$outf" >/dev/null && jq -e '.review_questions' "$host" >/dev/null; then
+    if jq -e '.review_questions' "$host" >/dev/null && { jq -e '.review_when == "always"' "$host" >/dev/null || jq -e '.human_check.needed' "$outf" >/dev/null; }; then
       if has_answer "$key#review"; then
         answers "$key" "$key#review" > "$OUT/tmp.answers.json"
         "$BRISK" "${common[@]}" "$@" --answers "$OUT/tmp.answers.json" --format json > "$outf"
@@ -236,13 +237,13 @@ else
     fi
     cp "$OUT/tmp.answers.json" "${outf%.json}.answers-used.json"
   }
-  for p in autonomous reviewed strict; do printf 'preset: %s\n' "$p" > "$OUT/$p.brisk.yaml"; done
+  for p in light balanced careful; do printf 'preset: %s\n' "$p" > "$OUT/$p.brisk.yaml"; done
   for c in $CASES; do
     common=(assess --repo "$R" --base main --head "$c" --session "$OUT/$c.session.json")
     score "$OUT/$c.final.json" "$c" "$OUT/$c.host.json"
     "$BRISK" "${common[@]}" --answers "$OUT/$c.final.answers-used.json" --format text > "$OUT/$c.final.txt"
     # The same answers under each preset, as a repo's base .brisk.yaml would set it.
-    for p in autonomous reviewed strict; do
+    for p in light balanced careful; do
       score "$OUT/$c.$p.json" "$c" "$OUT/$c.host.json" --config "$OUT/$p.brisk.yaml"
     done
     score "$OUT/$c.project.json" "$c@project" "$OUT/$c.project.host.json" --config "$PROJECT"

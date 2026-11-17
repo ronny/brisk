@@ -93,7 +93,7 @@ def runtime():
     d.box(860, 295, 300, 145, "Assessment", [
         "Low / Medium / High",
         "Reasons, evidence and next action",
-        "Agent review: recommendation + reason",
+        "Human check: ask a person? + what to ask",
         "Provenance records the applied policy"], blue=True)
 
     d.edge("600,220 600,295", "calls CLI + supplies session", (700, 263))
@@ -107,7 +107,7 @@ def runtime():
     d.box(435, 555, 330, 120, "Project context + policy", [
         "Git history; path + content rules",
         "Base config: policy, questions, rules file",
-        "Presets: autonomous / reviewed / strict"])
+        "Presets: light / balanced / careful"])
     d.box(830, 555, 330, 120, "Classifier backends", [
         "Jev through OpenRouter",
         "Host: harness answers the questions",
@@ -115,7 +115,7 @@ def runtime():
     d.edge("205,555 205,495 480,495 480,440", "findings", (298, 485))
     d.edge("600,555 600,440", "context", (634, 522))
     d.edge("995,555 995,495 720,495 720,440", "answers", (911, 485))
-    d.text(40, 715, "MVP components shown · reviewed is the default preset · Additional implementations are interface-only", 12, MUTED)
+    d.text(40, 715, "MVP components shown · balanced is the default preset · Additional implementations are interface-only", 12, MUTED)
     d.save("architecture.svg")
 
 

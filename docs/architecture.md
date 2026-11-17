@@ -10,7 +10,7 @@ The overview shows the main components. Implementation details and the separate 
 
 ## Scope and status
 
-This snapshot includes policy presets, agent review with its review plan, and project rules (`content_rules` and project `questions`) from the [core thread](https://ampcode.com/threads/T-01a1e74a-81c7-76ef-8fa3-ac7baacb2a0f). The overview shows the implemented MVP shape.
+This snapshot includes `human_check` (whether a person should look too), policy presets, the agent review plan, the local assessment log, versioned releases, and project rules (`content_rules` and project `questions`) from the [core thread](https://ampcode.com/threads/T-01a1e74a-81c7-76ef-8fa3-ac7baacb2a0f). The overview shows the implemented MVP shape.
 Additional implementations are interface-only. The input box identifies untrusted evidence.
 
 | Part | MVP implementation | Extension boundary |
@@ -63,7 +63,7 @@ The direct route calls Jev through OpenRouter. The rules-only route makes no mod
 
 Base-commit `.brisk.yaml` controls policy. Its optional keys are:
 
-- `preset`: `autonomous`, `reviewed` (default), or `strict`.
+- `preset`: `light`, `balanced` (default), or `careful`. The earlier names `autonomous`, `reviewed` and `strict` are aliases.
 - `sensitive_paths`: project-specific path rules and their minimum tiers.
 - `content_rules`: project-specific regular expressions on changed, non-comment lines in matching paths, with minimum tiers.
 - `questions`: up to 10 project yes/no questions that the model answers with brisk's own questions.
@@ -72,32 +72,36 @@ Base-commit `.brisk.yaml` controls policy. Its optional keys are:
 - `overrides`: answer thresholds that raise the model tier. These replace the calibration overrides.
 - `rule_tiers`: rule-specific tiers, applied before the engine computes the rule floor.
 - `actions`: action text for each tier.
-- `agent_review`: independent review conditions, with `min_tier`, `min_uncertainty`, `questions`, and `rules`.
+- `human_check`: when to ask a person, with `min_tier`, `min_uncertainty`, `questions`, and `rules`. `agent_review` still reads these keys as their earlier spelling; `human_check` wins.
+- `agent_review`: `tailor_plan` (`always`, `needed`, or `never`).
 - `review_checks`: the team's own review area and checks for a project rule or question.
 - `business_rules`: a Markdown file of the project's business rules, read from the base commit. Its capped text reaches the model as labelled context, and `agent_review.context_files` names it for the reviewer. It never sets a tier: questions and content rules do.
 
 Path and content rules hit as `config:<id>` and set the floor like built-in rules. A content rule matches one line at a time, so it is a tripwire, not a guarantee.
 Project questions have no calibration weight. Each one acts only through its `raise_to` override, so it can raise the model tier but never lower it. Without `raise_to`, the answer appears only in `provenance.answers`.
-A fired project question shows its configured `reason`. The `agent_review.reason` stays brisk's fixed text.
+A fired project question shows its configured `reason`. `human_check.reason` stays brisk's fixed text.
 
 Brisk asks seven typed questions of its own, including `follow_up_fix`, a yes/no forecast of a bug fix within two weeks, which the jev-1.14 calibration weights with size and impact.
 Calibration remains specific to the answering model version. Rule floors and overrides can exceed the requested model-only shares.
-Review conditions are ORed. They use existing answers and rule hits, without another model call.
+`human_check` conditions are ORed. They use existing answers and rule hits, without another model call.
 
-Every assessment includes `agent_review: { recommended, reason }`, including the host request's `floor_assessment`.
-The recommendation is independent of the tier: Low or Medium can also warrant an agent review.
-`agent_review.plan` lists review areas with evidence and checks, most important first. Area and check text come from brisk's catalog or the base config's `review_checks`, never from the model.
-The model only scores each area 0–3 in a second call on the same state, made by default only when a review is recommended (`agent_review.tailor_plan`). Its cost is added to `provenance.usage`, and `provenance.review_plan.status` separates tailored, not asked, pending and failed. Low-scoring areas that no High rule or override requires are dropped. Without those answers the plan is brisk's full list.
-The recommendation does not perform review or prove approval.
+Brisk assumes every change gets one agent review. The assessment (`brisk.assessment/v2`) leads with `human_check: { needed, why, reason, consider }`, including the host request's `floor_assessment`: whether a person should look too, and at most two things for them to think about.
+`human_check` is independent of the tier: a Medium change can need a person, and a High one can be left to the agent review under the `light` preset.
+`agent_review` guides that review: `plan` lists review areas with evidence and checks, most important first, and `context_files` names the business-rules file. Area and check text come from brisk's catalog or the base config's `review_checks`, never from the model. `human_check.consider` takes the top areas' questions from a fixed catalog, so it never carries model or repository text.
+The model only scores each area 0–3 in a second call on the same state, made by default for every change, alongside the main call (`agent_review.tailor_plan: always`). Its cost is added to `provenance.usage`, and `provenance.review_plan.status` separates tailored, not asked, pending and failed. Low-scoring areas that no High rule or override requires are dropped. Without those answers the plan is brisk's full list.
+`human_check` does not perform review or prove approval.
+
+The CLI appends each assessment to `<git-common-dir>/brisk/assessments.jsonl`, outside the worktree, with the changed paths, `human_check` and provenance, so real use can serve as an evaluation. `BRISK_LOG` sets another file or `off`.
+`provenance.brisk_version` is the release tag (`vYYYYMMDD-NN`, Melbourne date) for release binaries, or `dev-<revision>` for other builds. A tag push builds static binaries for six platforms and attaches them to a GitHub release.
 
 Policy provenance includes:
 
-- `provenance.preset`: the effective preset, including the default `reviewed`.
+- `provenance.preset`: the effective preset, including the default `balanced`.
 - `provenance.thresholds`: the effective model thresholds, when model scoring occurs.
 - `provenance.policy_note`: an explanation when policy cannot apply fully, such as missing calibration quantiles for shares.
 
 A `policy_note` does not mean rules-only fallback. Backend failure remains separate in `provenance.degraded`.
-Trusted adapter policy controls review automation and optional human-only Ship confirmation.
+Trusted adapter policy controls review automation and the human-only Ship dialog. The Amp plugin labels the thread `brisk-risk-*` and `brisk-needs-human`, and keeps a Brisk assessment artifact in the thread.
 The Amp integration is advisory, not a universal gate on arbitrary `git push` commands.
 
 ## Evaluation and CI
@@ -109,6 +113,7 @@ The Amp integration is advisory, not a universal gate on arbitrary `git push` co
 The offline evaluator prepares historical changes with the same engine that the CLI uses.
 It compares scores against noisy outcome labels from reverts, subsequent fixes, and optional supplied CI failures.
 It separates training and held-out changes for calibration and evaluation.
+`brisk-eval human` measures, per preset, how often brisk asks for a person, how many bad changes it asks about, and whether its questions point at the files a later fix touched. The first numbers are preliminary; real use, through the assessment log, is the ongoing evaluation.
 
 Fixture tests replay committed Jev answers without network access, an API key, or model cost.
 A changed model request requires a new recording. Tests fail rather than silently ask the live model.

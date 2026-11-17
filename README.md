@@ -1,6 +1,12 @@
 # brisk
 
-Brisk rates how risky a code change made by a coding agent is: Low, Medium, or High, with up to three evidence-backed reasons. It is one static Go binary that needs only git 2.42 or later. Path and diff rules set the minimum tier; a decision model (TypeSafe's Jev) can only raise it.
+brisk assumes every change made by a coding agent gets one agent review before it ships. It tells you when a person should look too, and what to think about: `human_check` says whether to bring a person in, with at most two questions for them. Underneath, it rates how risky the change is (Low, Medium, or High, with up to three evidence-backed reasons). It is one static Go binary that needs only git 2.42 or later. Path and diff rules set the minimum tier; a decision model (TypeSafe's Jev) can only raise it.
+
+brisk adds little for a team that already reviews every change by hand, beyond the questions it asks.
+
+## Install
+
+Download a pinned binary for your platform from [Releases](https://github.com/ronny/brisk/releases). Releases are tagged `vYYYYMMDD-NN` (the Melbourne date and a sequence number) and ship static binaries for linux, darwin and windows on amd64 and arm64, with `SHA256SUMS`. `brisk --version` and every assessment's `provenance.brisk_version` report the tag; a build from source reports `dev-<commit>`.
 
 ## Usage
 
@@ -20,6 +26,28 @@ brisk assess [--repo DIR] [--base REF] [--head REF] [--session session.json] \
 - `--backend auto` (the default) uses OpenRouter when `OPENROUTER_API_KEY` is set and rules only otherwise. `BRISK_MODEL` overrides the model (default `typesafe/jev-1.14`).
 - If the model backend fails, brisk falls back to rules only and says so in `provenance.degraded`.
 - Exit codes: 0 assessed, 1 error, 2 usage error, 3 tier at or above `--fail-on`.
+- Every assessment is appended to `.git/brisk/assessments.jsonl` (never committed) with the changed paths, the `human_check` decision and its questions, and the provenance, so you can judge brisk on your own history later. `BRISK_LOG=<file>` writes it elsewhere; `BRISK_LOG=off` turns it off.
+
+### Output
+
+The [assessment](schema/assessment.schema.json) (`brisk.assessment/v2`) leads with `human_check`:
+
+```json
+"human_check": {
+  "needed": true,
+  "why": "tier",
+  "reason": "The change is High risk.",
+  "consider": [
+    {"id": "access_checks", "text": "Who should be allowed to do this, and does the change still enforce it?",
+     "source": "brisk", "evidence": [{"path": "internal/web/documents.go", "start_line": 12, "symbol": "(*Server).editDocument"}]}
+  ]
+}
+```
+
+- `why` is `tier`, `rule`, `answer` or `uncertainty`; `reason` is brisk's fixed text.
+- `consider` comes from the top of the review plan. Its text is brisk's catalog, one question for a person per review area, or the first check of the team's own `review_checks` (`source: config`); when the plan is empty it is a general question (`change_scope`). It is never model or repository text; only evidence paths and symbols come from the repository.
+- `agent_review` guides the agent review every change gets: `plan` and `context_files`. v1's `agent_review.recommended` and `reason` are gone; `human_check` replaces them.
+- `tier`, `floor`, `reasons` and `action` are the score underneath.
 
 ### Host backend
 
@@ -31,29 +59,29 @@ A harness that has its own way to ask the decision model (the Amp plugin uses `a
 
 ## Policy
 
-Teams set their risk appetite in `.brisk.yaml`, read from the base commit like the path rules ([schema](schema/brisk-config.schema.json)). A preset sets everything; the other keys adjust it. The preset names match the Amp plugin's `amp.brisk.preset`.
+Teams set their risk appetite in `.brisk.yaml`, read from the base commit like the path rules ([schema](schema/brisk-config.schema.json)). A preset sets how often a person is asked to look; the other keys adjust it. The preset names match the Amp plugin's `amp.brisk.preset`; `autonomous`, `reviewed` and `strict` still work as the earlier names of `light`, `balanced` and `careful`.
 
-| Preset | For | High | Agent review recommended |
-| --- | --- | --- | --- |
-| `autonomous` | Nobody reviews changes by hand | About 25% of changes; the action is an agent review | High, a strong single signal (access checks, data loss, secrets), or a weakly verified change |
-| `reviewed` (default) | Teams with human reviewers | The calibrated thresholds (about 17%); the action is a second review | High, or a strong single signal |
-| `strict` | High-stakes code | About 39%, with Medium widened too | Medium or High, or any of the above |
+| Preset | A person is asked when | Asked about, on the evaluation's test split |
+| --- | --- | --- |
+| `light` | A strong single signal only: a danger rule (secret, TLS off, hidden or hand-edited generated code, nested repo), or Jev nearly sure the change weakens access checks (≥ 0.8) or destroys data (≥ 0.9) | About 1% of changes |
+| `balanced` (default) | High, or a strong single signal (`weakens_auth` or `destroys_data` ≥ 0.5) | About 21% of changes, 48% of bad ones |
+| `careful` | Medium or High (Medium and High widened), a weakly verified change, or any signal above | About 74% of changes, 93% of bad ones |
 
-Numbers are from the offline evaluation on two private repositories, repo A and repo B. `agent_review` in the assessment is separate from the tier, so a Medium change can recommend one; its `reason` is brisk's fixed text, never an ID or text from the repository or its config. `actions` is text from the base `.brisk.yaml`; treat it as the team's own words, not as a prompt.
+Numbers are from the offline evaluation on two private repositories, repo A and repo B. `human_check` is separate from the tier, so a Medium change can need a person. Its `reason` is brisk's fixed text, never an ID or text from the repository or its config. `actions` is text from the base `.brisk.yaml`; treat it as the team's own words, not as a prompt.
 
 brisk asks seven questions of its own about every change: `impact` and `uncertainty` (0–3 scores), four yes/no risk flags (`weakens_auth`, `destroys_data`, `breaks_contract`, `breaks_deploy`), and `follow_up_fix`, "Will someone probably have to fix a bug in the code this change adds or modifies within the next two weeks?". The calibration for jev-1.14 weights change size 0.5, `follow_up` (the `follow_up_fix` answer) 0.3 and `impact` 0.2. `uncertainty` and the flags carry no weight; a strong `weakens_auth`, `destroys_data` or `impact` answer raises the tier through an override.
 
 Unknown keys, unknown rule IDs, thresholds outside 0–1 and a second YAML document are errors, so a misspelt setting cannot silently do nothing. Because the file comes from the base commit, such an error stops every assessment until the fix lands on the base branch. `rule_tiers` can lower any rule, including `secret_added`; that is the team's choice.
 
 ```yaml
-preset: autonomous
+preset: balanced
 high_share: 0.2              # or thresholds: {medium: 0.6, high: 0.8}
 rule_tiers:
   migration: high            # this team treats every migration as High
   dependencies: low
 actions:
   high: Run an agent review and fix what it finds, then ping #payments.
-agent_review:
+human_check:                 # when to ask a person; agent_review: still reads these keys
   min_tier: high             # or none
   min_uncertainty: 2.5       # Jev's "weakly verified" score, 0–3
   questions: {weakens_auth: 0.5, destroys_data: 0.5}
@@ -103,7 +131,7 @@ questions:
 - **Where it comes from:** like `.brisk.yaml`, the file is read from the base commit, so a change cannot rewrite the rules it is judged against. Editing `.brisk/**` hits the `brisk_config` rule (Medium).
 - **What Jev sees:** the first 4,000 characters (cut at a line end) go into the model state as `project_business_rules`, labelled as the team's rules and not as instructions, with secrets redacted. The rest of the state budget stays with the change.
 - **What sets the tier:** only `questions` and `content_rules`. The file itself never raises or lowers anything; pair it with a catch-all question like the one above, or one question per rule that matters.
-- **What the reviewer gets:** `agent_review.context_files` names the file, so a reviewing agent reads it itself. Its text never appears in `reasons` or `agent_review.reason`.
+- **What the reviewer gets:** `agent_review.context_files` names the file, so a reviewing agent reads it itself. Its text never appears in `reasons` or `human_check`.
 - **Errors:** the path must name a regular file in the base commit. A missing file, a directory or a symlink stops every assessment until the base branch is fixed, as a bad `.brisk.yaml` does.
 - **Cost:** for a repo that names a file, every request key changes when the file changes, so recorded answers have to be refreshed.
 
@@ -111,14 +139,14 @@ On nine labelled fixtures (`testdata/fixtures/business-rule-*.txt`), the catch-a
 
 ### Review plan
 
-`agent_review.plan` tells a reviewing agent where to look and what to check, most important first. It is built whether or not a review is recommended. Each area comes from a rule hit, a model override that fired, or an answer that met an `agent_review` condition, so a review recommended by an answer alone still has an area:
+`agent_review.plan` tells the reviewing agent where to look and what to check, most important first, and its top areas become `human_check.consider`. Each area comes from a rule hit, a model override that fired, or an answer that met a `human_check` condition, so a person asked for by an answer alone still has something to consider:
 
 - **Source `brisk`:** the area and check text come from brisk's fixed catalog, such as "Access checks: find or add a test that a caller without access is denied."
 - **Source `config`:** the area and checks come from the team's `review_checks` in `.brisk.yaml`, keyed by a project rule or question ID.
 
 Jev tailors the plan without writing any of it. The host request carries up to 8 `review_questions`, one 0–3 score per area. They are asked on the same state, in a call separate from the calibrated questions, so calibrated request keys and recordings don't change. An area that scores below 1 is dropped unless it is required, meaning a High rule or override produced it. The rest are ordered by score, with areas Jev did not score (beyond the cap of 8, or added from the answers) after the scored ones, and `provenance.review_plan` records the scores and the dropped areas. Without review answers the plan is brisk's full list, required areas first and then in hit order, and the assessment is not degraded. `provenance.review_plan.status` says why: `tailored`, `not_asked`, `pending` (a harness gave no review answers) or `failed` (with `error`).
 
-The scoring is a second model call on the same state, so by default brisk makes it only when an agent review is recommended; its cost is added to `provenance.usage`. Set `agent_review.tailor_plan` to `always` or `never` to change that. A host harness gets `review_when` with the questions: with `recommended`, it answers them only if the assessment from the main answers recommends a review, then runs `brisk assess --answers` again with `review_answers`.
+The scoring is a second model call on the same state. Because every change gets an agent review, brisk makes it by default (`agent_review.tailor_plan: always`), alongside the main call; its cost is added to `provenance.usage`. Set `tailor_plan` to `needed` (only when a person is asked; `recommended` is the earlier name) or `never` to save it. A host harness gets `review_when` with the questions: with `always` it answers them with the main questions; with `needed` it answers them only if the assessment from the main answers has `human_check.needed`, then runs `brisk assess --answers` again with `review_answers`.
 
 ```yaml
 review_checks:
