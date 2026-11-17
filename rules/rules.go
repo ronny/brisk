@@ -135,7 +135,16 @@ var credentialFiles = globs("**/.env", "**/.env.*", "**/fnox.toml", "**/*.pem", 
 // should not leave the machine.
 func IsCredentialFile(p string) bool { return credentialFiles(p) }
 
-var codeOnly = func(p string) bool { return !IsTest(p) && !IsDoc(p) && !IsGenerated(p) }
+// IsGeneratedChange reports whether fc touches only generated code: its
+// path is generated, and so was its old path when it was renamed or copied.
+// Renaming code into a generated path must not exempt it from analysis.
+func IsGeneratedChange(fc risk.FileChange) bool {
+	return IsGenerated(fc.Path) && (fc.OldPath == "" || IsGenerated(fc.OldPath))
+}
+
+func codeOnly(fc risk.FileChange) bool {
+	return !IsTest(fc.Path) && !IsDoc(fc.Path) && !IsGeneratedChange(fc)
+}
 
 var builtinPathRules = []pathRule{
 	{
@@ -145,12 +154,12 @@ var builtinPathRules = []pathRule{
 	{
 		id: "auth", tier: risk.Medium, text: "Changes authentication or authorisation code",
 		match:  segs("auth", "authn", "authz", "oauth", "oidc", "permissions?", "rbac", "acl", "access_?control", "login", "jwt", "passwords?", "csrf", "sessions?", "middleware", "policy", "policies", "guard", "guards", "roles?"),
-		ignore: func(fc risk.FileChange) bool { return !codeOnly(fc.Path) },
+		ignore: func(fc risk.FileChange) bool { return !codeOnly(fc) },
 	},
 	{
 		id: "payments", tier: risk.Medium, text: "Changes payment or billing code",
 		match:  segs("billing", "payments?", "invoices?", "checkout", "stripe", "refunds?", "charges?", "subscriptions?", "pricing"),
-		ignore: func(fc risk.FileChange) bool { return !codeOnly(fc.Path) },
+		ignore: func(fc risk.FileChange) bool { return !codeOnly(fc) },
 	},
 	{
 		id: "ci_deploy", tier: risk.Medium, text: "Changes CI, deployment, or infrastructure",
@@ -277,7 +286,7 @@ func Apply(cs *risk.ChangeSet, findings []risk.Finding, session *risk.Session, c
 			if r.paths != nil && !r.paths(fc.Path) {
 				continue
 			}
-			if r.paths == nil && !codeOnly(fc.Path) {
+			if r.paths == nil && !codeOnly(fc) {
 				continue
 			}
 			for _, l := range added {

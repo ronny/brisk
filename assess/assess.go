@@ -113,7 +113,7 @@ func (e *Engine) analyze(ctx context.Context, cs *risk.ChangeSet) []risk.Finding
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, 8)
 	for _, f := range cs.Files {
-		if f.Binary || rules.IsGenerated(f.Path) || f.Status == risk.Deleted && len(f.Old) == 0 {
+		if f.Binary || rules.IsGeneratedChange(f) || f.Status == risk.Deleted && len(f.Old) == 0 {
 			continue
 		}
 		for _, lb := range e.Lang {

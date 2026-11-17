@@ -61,7 +61,7 @@ func buildState(cs *risk.ChangeSet, findings []risk.Finding, hits []rules.Hit, p
 		switch {
 		case rules.IsTest(f.Path):
 			tests++
-		case !rules.IsDoc(f.Path) && !rules.IsGenerated(f.Path):
+		case !rules.IsDoc(f.Path) && !rules.IsGeneratedChange(f):
 			code++
 		}
 		if i >= 60 {
@@ -97,7 +97,7 @@ func buildState(cs *risk.ChangeSet, findings []risk.Finding, hits []rules.Hit, p
 	budget := MaxStateChars - len(fixed) - 200
 	var b strings.Builder
 	for _, f := range files {
-		if f.Binary || rules.IsGenerated(f.Path) {
+		if f.Binary || rules.IsGeneratedChange(f) {
 			continue
 		}
 		chunk := fileDiff(f)
@@ -158,7 +158,7 @@ func priority(f risk.FileChange, tags map[string][]string) int {
 		p += 100
 	}
 	switch {
-	case rules.IsGenerated(f.Path):
+	case rules.IsGeneratedChange(f):
 		p -= 50
 	case rules.IsDoc(f.Path):
 		p -= 20

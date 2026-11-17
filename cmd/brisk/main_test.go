@@ -377,3 +377,24 @@ func TestAnswersAreBoundToTheWholeChange(t *testing.T) {
 		t.Fatalf("stale answers for a clipped change: exit %d, stderr %q", code, errs)
 	}
 }
+
+// Renaming code into a generated path does not exempt it from rules,
+// language analysis, or the model's diff.
+func TestRenameIntoGeneratedPathIsStillAnalysed(t *testing.T) {
+	dir := newRepo(t)
+	write(t, dir, "internal/auth/check.go", "package auth\n\nfunc CanAccess(ok bool) bool {\n\treturn ok\n}\n")
+	git(t, dir, "add", "-A")
+	git(t, dir, "commit", "-q", "-m", "check")
+	git(t, dir, "mv", "internal/auth/check.go", "internal/auth/check_gen.go")
+	write(t, dir, "internal/auth/check_gen.go", "package auth\n\nfunc CanAccess(ok bool) bool {\n\treturn true\n}\n")
+
+	a := assessJSON(t, "--repo", dir, "--base", "HEAD")
+	hits := a.Provenance.RuleHits
+	if a.Floor != risk.High || !slices.Contains(hits, "auth") || !slices.Contains(hits, "lang:auth_logic_changed") {
+		t.Fatalf("floor %s hits %v, want high with auth and lang:auth_logic_changed", a.Floor, hits)
+	}
+	code, out, _ := runCLI(t, "assess", "--repo", dir, "--base", "HEAD", "--backend", "host", "--format", "json")
+	if code != 0 || !strings.Contains(out, "return true") {
+		t.Fatalf("the renamed file's diff should reach the model state:\n%s", out)
+	}
+}
