@@ -80,6 +80,7 @@ Path and content rules hit as `config:<id>` and set the floor like built-in rule
 Project questions have no calibration weight. Each one acts only through its `raise_to` override, so it can raise the model tier but never lower it. Without `raise_to`, the answer appears only in `provenance.answers`.
 A fired project question shows its configured `reason`. The `agent_review.reason` stays brisk's fixed text.
 
+Brisk asks seven typed questions of its own, including `follow_up_fix`, a yes/no forecast of a bug fix within two weeks, which the jev-1.14 calibration weights with size and impact.
 Calibration remains specific to the answering model version. Rule floors and overrides can exceed the requested model-only shares.
 Review conditions are ORed. They use existing answers and rule hits, without another model call.
 

@@ -35,11 +35,13 @@ Teams set their risk appetite in `.brisk.yaml`, read from the base commit like t
 
 | Preset | For | High | Agent review recommended |
 | --- | --- | --- | --- |
-| `autonomous` | Nobody reviews changes by hand | About 26% of changes; the action is an agent review | High, a strong single signal (access checks, data loss, secrets), or a weakly verified change |
-| `reviewed` (default) | Teams with human reviewers | The calibrated thresholds (about 19%); the action is a second review | High, or a strong single signal |
-| `strict` | High-stakes code | About 41%, with Medium widened too | Medium or High, or any of the above |
+| `autonomous` | Nobody reviews changes by hand | About 25% of changes; the action is an agent review | High, a strong single signal (access checks, data loss, secrets), or a weakly verified change |
+| `reviewed` (default) | Teams with human reviewers | The calibrated thresholds (about 17%); the action is a second review | High, or a strong single signal |
+| `strict` | High-stakes code | About 39%, with Medium widened too | Medium or High, or any of the above |
 
 Numbers are from the evaluation on repo A and repo B. `agent_review` in the assessment is separate from the tier, so a Medium change can recommend one; its `reason` is brisk's fixed text, never an ID or text from the repository or its config. `actions` is text from the base `.brisk.yaml`; treat it as the team's own words, not as a prompt.
+
+brisk asks seven questions of its own about every change: `impact` and `uncertainty` (0–3 scores), four yes/no risk flags (`weakens_auth`, `destroys_data`, `breaks_contract`, `breaks_deploy`), and `follow_up_fix`, "Will someone probably have to fix a bug in the code this change adds or modifies within the next two weeks?". The calibration for jev-1.14 weights change size 0.5, `follow_up` (the `follow_up_fix` answer) 0.3 and `impact` 0.2. `uncertainty` and the flags carry no weight; a strong `weakens_auth`, `destroys_data` or `impact` answer raises the tier through an override.
 
 Unknown keys, unknown rule IDs, thresholds outside 0–1 and a second YAML document are errors, so a misspelt setting cannot silently do nothing. Because the file comes from the base commit, such an error stops every assessment until the fix lands on the base branch. `rule_tiers` can lower any rule, including `secret_added`; that is the team's choice.
 
