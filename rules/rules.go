@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"path"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -150,6 +151,9 @@ func IsCredentialFile(p string) bool { return credentialFiles(p) }
 // A new file, or code renamed into a generated name, is analysed. Lockfiles
 // are data, not code, and are always skipped.
 func IsGeneratedChange(fc risk.FileChange) bool {
+	if fc.HandEdited {
+		return false
+	}
 	if isLockfile(fc.Path) {
 		return fc.OldPath == "" || isLockfile(fc.OldPath)
 	}
@@ -158,6 +162,29 @@ func IsGeneratedChange(fc risk.FileChange) bool {
 		old = fc.OldPath
 	}
 	return fc.Status != risk.Added && generatedName(fc.Path) && generatedName(old)
+}
+
+// generatedMarker matches the comment generators put at the top of a file.
+var generatedMarker = regexp.MustCompile(`(?m)^(//|/\*|\s\*|#|--).*(Code generated .* DO NOT EDIT|@generated)`)
+
+// HasGeneratedMarker reports whether the start of src says it is generated.
+func HasGeneratedMarker(src []byte) bool {
+	return generatedMarker.Match(src[:min(len(src), 2048)])
+}
+
+// HandEditedGenerated reports whether the session shows the agent edited
+// fc with its own tools although the file was generated before the change,
+// by name, lockfile, or marker. A generator run through the shell does not
+// show up in files_touched.
+func HandEditedGenerated(fc risk.FileChange, s *risk.Session) bool {
+	if s == nil || fc.Status == risk.Added || !slices.Contains(s.FilesTouched, fc.Path) {
+		return false
+	}
+	old := fc.Path
+	if fc.OldPath != "" {
+		old = fc.OldPath
+	}
+	return generatedName(old) || isLockfile(old) || HasGeneratedMarker(fc.Old)
 }
 
 func codeOnly(fc risk.FileChange) bool {
@@ -268,6 +295,11 @@ func Apply(cs *risk.ChangeSet, findings []risk.Finding, session *risk.Session, c
 		hits = append(hits, Hit{ID: id, Tier: tier, Text: text, Source: source, Evidence: []risk.Evidence{ev}})
 	}
 
+	for _, fc := range cs.Files {
+		if fc.HandEdited {
+			add("generated_hand_edited", risk.Medium, "The agent edited a generated file by hand", "session", risk.Evidence{Path: fc.Path})
+		}
+	}
 	for _, p := range cs.IgnoredByChange {
 		add("gitignore_hides_code", risk.Medium, "A .gitignore line the change adds hides code files", "rule", risk.Evidence{Path: p})
 	}

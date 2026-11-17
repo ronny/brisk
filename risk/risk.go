@@ -104,6 +104,9 @@ type FileChange struct {
 	Hunks     []Hunk     `json:"-"`
 	Old       []byte     `json:"-"`
 	New       []byte     `json:"-"`
+	// HandEdited is set when the session shows the agent edited a file
+	// that was generated before the change; it is then analysed as code.
+	HandEdited bool `json:"hand_edited,omitempty"`
 }
 
 // ChangeSet is the whole change being assessed.

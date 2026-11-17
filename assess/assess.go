@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -62,6 +63,9 @@ func (e *Engine) Prepare(ctx context.Context, in Input) (*Prepared, error) {
 	if err != nil {
 		return nil, err
 	}
+	for i := range cs.Files {
+		cs.Files[i].HandEdited = rules.HandEditedGenerated(cs.Files[i], in.Session)
+	}
 	p.Changes = cs
 	lap("git", t)
 
@@ -100,6 +104,14 @@ func (e *Engine) Prepare(ctx context.Context, in Input) (*Prepared, error) {
 	return p, nil
 }
 
+// unmarkGenerated lowercases the generated-code markers in src.
+func unmarkGenerated(src []byte) []byte {
+	if src == nil {
+		return nil
+	}
+	return []byte(strings.NewReplacer("DO NOT EDIT", "do not edit", "@generated", "@Generated").Replace(string(src)))
+}
+
 // analyze runs the language backends over changed files in parallel.
 func (e *Engine) analyze(ctx context.Context, cs *risk.ChangeSet) []risk.Finding {
 	if len(e.Lang) == 0 {
@@ -115,6 +127,12 @@ func (e *Engine) analyze(ctx context.Context, cs *risk.ChangeSet) []risk.Finding
 	for _, f := range cs.Files {
 		if f.Binary || rules.IsGeneratedChange(f) || f.Status == risk.Deleted && len(f.Old) == 0 {
 			continue
+		}
+		if f.HandEdited {
+			// Language backends skip files that say they are generated;
+			// show them a copy whose marker no longer says so. Only
+			// comment text changes, so lines and code stay the same.
+			f.Old, f.New = unmarkGenerated(f.Old), unmarkGenerated(f.New)
 		}
 		for _, lb := range e.Lang {
 			if !lb.Supports(f.Path) {

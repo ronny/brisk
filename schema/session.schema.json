@@ -9,7 +9,7 @@
     "harness": { "type": "string", "description": "e.g. \"amp\", \"claude-code\"" },
     "session_id": { "type": "string", "description": "Harness session ID, e.g. an Amp thread ID" },
     "intent": { "type": "string", "description": "The task as the user stated it, up to ~2,000 characters" },
-    "files_touched": { "type": "array", "items": { "type": "string" }, "description": "Repo-relative paths the agent edited" },
+    "files_touched": { "type": "array", "items": { "type": "string" }, "description": "Repo-relative paths the agent edited with its own tools (not through a generator). A generated file listed here is analysed as code and flagged." },
     "commands": {
       "type": "array",
       "description": "Shell commands the agent ran, oldest first. brisk recognises test, type-check, lint, and build commands itself.",
