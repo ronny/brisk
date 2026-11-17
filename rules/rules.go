@@ -108,11 +108,19 @@ func IsDoc(p string) bool {
 
 // IsGenerated reports whether p is a lockfile or generated code.
 func IsGenerated(p string) bool {
-	b := path.Base(p)
-	switch b {
+	return isLockfile(p) || generatedName(p)
+}
+
+func isLockfile(p string) bool {
+	switch path.Base(p) {
 	case "go.sum", "pnpm-lock.yaml", "package-lock.json", "yarn.lock", "bun.lockb", "bun.lock", "mise.lock", "Cargo.lock", "buf.lock", "uv.lock", "poetry.lock":
 		return true
 	}
+	return false
+}
+
+func generatedName(p string) bool {
+	b := path.Base(p)
 	return strings.Contains(b, ".pb.") || strings.HasSuffix(b, "_pb.ts") || strings.HasSuffix(b, "_pb.js") ||
 		strings.HasSuffix(b, ".gen.go") || strings.HasSuffix(b, "_gen.go") || strings.HasSuffix(b, ".generated.ts") ||
 		strings.Contains(p, "/gen/") || strings.HasPrefix(p, "gen/") || strings.HasSuffix(b, ".snap") || strings.HasSuffix(b, ".min.js")
@@ -135,11 +143,21 @@ var credentialFiles = globs("**/.env", "**/.env.*", "**/fnox.toml", "**/*.pem", 
 // should not leave the machine.
 func IsCredentialFile(p string) bool { return credentialFiles(p) }
 
-// IsGeneratedChange reports whether fc touches only generated code: its
-// path is generated, and so was its old path when it was renamed or copied.
-// Renaming code into a generated path must not exempt it from analysis.
+// IsGeneratedChange reports whether fc can skip analysis as generated
+// code. A name is only a claim the change makes, so it counts only when the
+// file already had a generated name before the change: an edit to an
+// existing generated file, or a rename from one generated name to another.
+// A new file, or code renamed into a generated name, is analysed. Lockfiles
+// are data, not code, and are always skipped.
 func IsGeneratedChange(fc risk.FileChange) bool {
-	return IsGenerated(fc.Path) && (fc.OldPath == "" || IsGenerated(fc.OldPath))
+	if isLockfile(fc.Path) {
+		return true
+	}
+	old := fc.Path
+	if fc.OldPath != "" {
+		old = fc.OldPath
+	}
+	return fc.Status != risk.Added && generatedName(fc.Path) && generatedName(old)
 }
 
 func codeOnly(fc risk.FileChange) bool {

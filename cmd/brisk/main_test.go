@@ -398,3 +398,25 @@ func TestRenameIntoGeneratedPathIsStillAnalysed(t *testing.T) {
 		t.Fatalf("the renamed file's diff should reach the model state:\n%s", out)
 	}
 }
+
+// A generated-looking name is a claim the change makes: a new file under
+// one is analysed. An edit to a file that already had such a name is not.
+func TestNewFileWithGeneratedNameIsAnalysed(t *testing.T) {
+	dir := newRepo(t)
+	write(t, dir, "internal/auth/api.pb.go", "package auth\n\nvar A = 1\n")
+	git(t, dir, "add", "-A")
+	git(t, dir, "commit", "-q", "-m", "pb")
+	write(t, dir, "internal/auth/api.pb.go", "package auth\n\nvar A = 2\n")
+	if a := assessJSON(t, "--repo", dir, "--base", "HEAD"); a.Floor != risk.Low {
+		t.Fatalf("edit to an existing generated file: floor %s hits %v, want low", a.Floor, a.Provenance.RuleHits)
+	}
+	write(t, dir, "internal/auth/hooks_gen.go", "package auth\n\nfunc init() { bypass = func() bool { return true } }\n")
+	a := assessJSON(t, "--repo", dir, "--base", "HEAD")
+	if a.Floor < risk.Medium || !slices.Contains(a.Provenance.RuleHits, "auth") {
+		t.Fatalf("new hooks_gen.go: floor %s hits %v, want auth at medium or more", a.Floor, a.Provenance.RuleHits)
+	}
+	_, out, _ := runCLI(t, "assess", "--repo", dir, "--base", "HEAD", "--backend", "host", "--format", "json")
+	if !strings.Contains(out, "bypass = func() bool") {
+		t.Fatalf("the new file's diff should reach the model state:\n%s", out)
+	}
+}
