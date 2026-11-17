@@ -113,6 +113,9 @@ type ChangeSet struct {
 	Head     string       `json:"head,omitempty"` // commit, or "" for the working tree
 	Files    []FileChange `json:"files"`
 	DiffHash string       `json:"diff_hash"`
+	// IgnoredByChange lists untracked code files that only a .gitignore
+	// line added by the change ignores. They are assessed as added files.
+	IgnoredByChange []string `json:"ignored_by_change,omitempty"`
 }
 
 // ---------------------------------------------------------------------------

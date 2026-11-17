@@ -268,6 +268,10 @@ func Apply(cs *risk.ChangeSet, findings []risk.Finding, session *risk.Session, c
 		hits = append(hits, Hit{ID: id, Tier: tier, Text: text, Source: source, Evidence: []risk.Evidence{ev}})
 	}
 
+	for _, p := range cs.IgnoredByChange {
+		add("gitignore_hides_code", risk.Medium, "A .gitignore line the change adds hides code files", "rule", risk.Evidence{Path: p})
+	}
+
 	for _, fc := range cs.Files {
 		paths := []string{fc.Path}
 		if fc.OldPath != "" {

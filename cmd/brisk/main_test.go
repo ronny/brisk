@@ -420,3 +420,31 @@ func TestNewFileWithGeneratedNameIsAnalysed(t *testing.T) {
 		t.Fatalf("the new file's diff should reach the model state:\n%s", out)
 	}
 }
+
+// A .gitignore line added by the change cannot hide new code from the
+// working-tree assessment. Files a .gitignore already ignored at the base
+// stay out.
+func TestGitignoreAddedByChangeCannotHideCode(t *testing.T) {
+	dir := newRepo(t)
+	write(t, dir, ".gitignore", "dist/\n")
+	git(t, dir, "add", "-A")
+	git(t, dir, "commit", "-q", "-m", "ignore")
+	write(t, dir, "dist/bundle.js", "export const x = 1\n")
+	bypass := "package auth\n\nfunc init() { bypass = func() bool { return true } }\n"
+	write(t, dir, "internal/auth/zz.go", bypass)
+	write(t, dir, "internal/auth/.gitignore", "zz.go\n")
+	write(t, dir, ".gitignore", "dist/\nnested/\n")
+	write(t, dir, "nested/deep/hook.go", bypass)
+
+	a := assessJSON(t, "--repo", dir, "--base", "HEAD")
+	hits := a.Provenance.RuleHits
+	if a.Floor < risk.Medium || !slices.Contains(hits, "gitignore_hides_code") || !slices.Contains(hits, "auth") {
+		t.Fatalf("floor %s hits %v, want gitignore_hides_code and auth", a.Floor, hits)
+	}
+	if a.Stats.Files != 4 {
+		t.Fatalf("files %d, want 4: two .gitignore edits, zz.go, hook.go; not dist/bundle.js", a.Stats.Files)
+	}
+	if st := git(t, dir, "status", "--porcelain", "--ignored"); !strings.Contains(st, "!! internal/auth/zz.go") {
+		t.Fatalf("the real index must be untouched:\n%s", st)
+	}
+}

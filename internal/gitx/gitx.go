@@ -12,6 +12,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -43,6 +44,11 @@ func Open(ctx context.Context, dir string) (*Repo, error) {
 // or bind a configured clean filter, which `git add` would run. Attributes
 // come only from $GIT_DIR/info/attributes. fsmonitor hooks are off too.
 func (r *Repo) Run(ctx context.Context, args ...string) ([]byte, error) {
+	return r.RunInput(ctx, nil, args...)
+}
+
+// RunInput is Run with stdin.
+func (r *Repo) RunInput(ctx context.Context, stdin []byte, args ...string) ([]byte, error) {
 	safe := []string{"-c", "core.quotePath=false", "-c", "color.ui=false",
 		"-c", "core.attributesFile=" + os.DevNull, "-c", "core.fsmonitor=false"}
 	if tree, err := emptyTree(ctx, r.Root); err != nil {
@@ -50,12 +56,15 @@ func (r *Repo) Run(ctx context.Context, args ...string) ([]byte, error) {
 	} else if tree != "" {
 		safe = append(safe, "--attr-source="+tree)
 	}
-	return r.run(ctx, append(safe, args...)...)
+	return r.run(ctx, stdin, append(safe, args...)...)
 }
 
-func (r *Repo) run(ctx context.Context, args ...string) ([]byte, error) {
+func (r *Repo) run(ctx context.Context, stdin []byte, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = r.Root
+	if stdin != nil {
+		cmd.Stdin = bytes.NewReader(stdin)
+	}
 	cmd.Env = append(append(os.Environ(), "GIT_OPTIONAL_LOCKS=0", "LC_ALL=C"), r.Env...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
@@ -74,7 +83,7 @@ func emptyTree(ctx context.Context, root string) (string, error) {
 	if v, ok := emptyTrees.Load(root); ok {
 		return v.(string), nil
 	}
-	out, err := (&Repo{Root: root}).run(ctx, "rev-parse", "--show-object-format")
+	out, err := (&Repo{Root: root}).run(ctx, nil, "rev-parse", "--show-object-format")
 	if err != nil {
 		return "", nil // not a repository; the real command reports it
 	}
@@ -162,6 +171,17 @@ func (r *Repo) Changes(ctx context.Context, base, head string) (*risk.ChangeSet,
 		if _, err := work.Run(ctx, "-c", "core.splitIndex=false", "add", "-A", "--", "."); err != nil {
 			return nil, err
 		}
+		hidden, err := work.hiddenByChange(ctx, baseID)
+		if err != nil {
+			return nil, err
+		}
+		if len(hidden) > 0 {
+			args := append([]string{"--literal-pathspecs", "-c", "core.splitIndex=false", "add", "-f", "--"}, hidden...)
+			if _, err := work.Run(ctx, args...); err != nil {
+				return nil, err
+			}
+		}
+		cs.IgnoredByChange = hidden
 		diffArgs = append(diffArgs, "--cached", baseID)
 	}
 	raw, err := work.Run(ctx, diffArgs...)
@@ -179,6 +199,94 @@ func (r *Repo) Changes(ctx context.Context, base, head string) (*risk.ChangeSet,
 	}
 	cs.Files = files
 	return cs, nil
+}
+
+// MaxHidden caps how many ignored code files hiddenByChange returns.
+const MaxHidden = 50
+
+// hiddenByChange returns untracked code files that are ignored only by a
+// line the change adds to a .gitignore, so a change cannot hide new code
+// from its own assessment by ignoring it. w must use the scratch index
+// that already holds the change.
+func (w *Repo) hiddenByChange(ctx context.Context, base string) ([]string, error) {
+	out, err := w.Run(ctx, "diff", "--cached", "--name-only", "--no-renames", "-z", base)
+	if err != nil {
+		return nil, err
+	}
+	changed := map[string]bool{}
+	for _, p := range strings.Split(string(out), "\x00") {
+		if path.Base(p) == ".gitignore" {
+			changed[p] = true
+		}
+	}
+	if len(changed) == 0 {
+		return nil, nil
+	}
+	ignored, err := w.Run(ctx, "ls-files", "-z", "-o", "-i", "--exclude-standard", "--directory")
+	if err != nil || len(ignored) == 0 {
+		return nil, err
+	}
+	// check-ignore exits 1 when nothing matches.
+	m, _ := w.RunInput(ctx, ignored, "check-ignore", "-v", "-z", "--stdin")
+	baseLines := map[string]map[string]bool{}
+	var hidden []string
+	f := strings.Split(string(m), "\x00")
+	for i := 0; i+3 < len(f) && len(hidden) < MaxHidden; i += 4 {
+		source, pattern, p := f[i], f[i+2], f[i+3]
+		if !changed[source] || strings.HasPrefix(pattern, "!") {
+			continue
+		}
+		lines, ok := baseLines[source]
+		if !ok {
+			lines = map[string]bool{}
+			b, _ := w.Run(ctx, "show", base+":"+source) // absent at base: every line is new
+			for _, l := range strings.Split(string(b), "\n") {
+				lines[strings.TrimSpace(l)] = true
+			}
+			baseLines[source] = lines
+		}
+		if lines[pattern] {
+			continue
+		}
+		hidden = append(hidden, codeFiles(w.Root, p, MaxHidden-len(hidden))...)
+	}
+	return hidden, nil
+}
+
+var codeExt = map[string]bool{".go": true, ".ts": true, ".tsx": true, ".js": true, ".jsx": true, ".mjs": true, ".cjs": true,
+	".py": true, ".rb": true, ".java": true, ".kt": true, ".rs": true, ".php": true, ".cs": true, ".swift": true,
+	".c": true, ".h": true, ".cc": true, ".cpp": true, ".sql": true, ".sh": true, ".proto": true}
+
+// codeFiles returns up to max code files at p, a file or a directory
+// ending in "/", relative to root. It skips dependency directories and
+// files larger than MaxContent, and stops after visiting 10,000 entries.
+func codeFiles(root, p string, max int) []string {
+	var out []string
+	visited := 0
+	filepath.WalkDir(filepath.Join(root, filepath.FromSlash(p)), func(abs string, d os.DirEntry, err error) error {
+		visited++
+		if err != nil || len(out) >= max || visited > 10000 {
+			return filepath.SkipAll
+		}
+		if d.IsDir() {
+			switch d.Name() {
+			case ".git", "node_modules", ".venv", "venv", "__pycache__":
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !d.Type().IsRegular() || !codeExt[strings.ToLower(filepath.Ext(abs))] {
+			return nil
+		}
+		if info, err := d.Info(); err != nil || info.Size() > MaxContent {
+			return nil
+		}
+		if rel, err := filepath.Rel(root, abs); err == nil {
+			out = append(out, filepath.ToSlash(rel))
+		}
+		return nil
+	})
+	return out
 }
 
 func (r *Repo) tempIndex(ctx context.Context) (string, func(), error) {
