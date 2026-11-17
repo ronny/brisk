@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ronny/brisk/schema/answer.schema.json",
+  "title": "typed answer",
+  "description": "One answer as returned by TypeSafe System One, OpenRouter /api/v1/systemone, or Amp's amp.ai.decide. Extra fields such as legend are ignored.",
+  "type": "object",
+  "required": ["type"],
+  "properties": {
+    "type": { "enum": ["noul", "score"] },
+    "noul": { "type": "number", "minimum": 0, "maximum": 1 },
+    "score": { "type": "number", "minimum": 0 },
+    "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+    "probabilities": { "type": "object", "additionalProperties": { "type": "number" } }
+  }
+}

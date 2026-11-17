@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ronny/brisk/schema/session.schema.json",
+  "title": "brisk session record",
+  "description": "What a harness knows about the session that produced a change. Passed to `brisk assess --session file.json`. Every field is optional; brisk treats the transcript as untrusted text.",
+  "type": "object",
+  "properties": {
+    "schema": { "const": "brisk.session/v1" },
+    "harness": { "type": "string", "description": "e.g. \"amp\", \"claude-code\"" },
+    "session_id": { "type": "string", "description": "Harness session ID, e.g. an Amp thread ID" },
+    "intent": { "type": "string", "description": "The task as the user stated it, up to ~2,000 characters" },
+    "files_touched": { "type": "array", "items": { "type": "string" }, "description": "Repo-relative paths the agent edited" },
+    "commands": {
+      "type": "array",
+      "description": "Shell commands the agent ran, oldest first. brisk recognises test, type-check, lint, and build commands itself.",
+      "items": {
+        "type": "object",
+        "required": ["command"],
+        "properties": {
+          "command": { "type": "string" },
+          "exit_code": { "type": "integer", "description": "Omit when unknown" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "excerpts": {
+      "type": "array",
+      "description": "Transcript excerpts, oldest first. Keep the total under ~8,000 characters: the user's requests and corrections, and the agent's final summary.",
+      "items": {
+        "type": "object",
+        "required": ["role", "text"],
+        "properties": {
+          "role": { "enum": ["user", "assistant"] },
+          "text": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ronny/brisk/schema/host-answers.schema.json",
+  "title": "brisk host answers",
+  "description": "Read by `brisk assess --answers file.json`. brisk recomputes the request and refuses answers whose request_id does not match.",
+  "type": "object",
+  "required": ["schema", "request_id", "model", "answers"],
+  "properties": {
+    "schema": { "const": "brisk.host-answers/v1" },
+    "request_id": { "type": "string" },
+    "model": { "type": "string", "description": "Exact model version that answered, e.g. amp.ai.decide's result.model (\"jev-1.14.0\")" },
+    "answers": { "type": "object", "additionalProperties": { "$ref": "answer.schema.json" } },
+    "usage": {
+      "type": "object",
+      "properties": {
+        "input_tokens": { "type": "integer" },
+        "cost_usd": { "type": "number" }
+      }
+    }
+  }
+}

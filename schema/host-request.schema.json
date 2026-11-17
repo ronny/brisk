@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ronny/brisk/schema/host-request.schema.json",
+  "title": "brisk host request",
+  "description": "Printed on stdout by `brisk assess --backend host --format json`. The harness sends `state` and `questions` unchanged to its decision model (for Amp: amp.ai.decide({ model: 'typesafe/jev', state, questions })), then writes a host-answers document and runs `brisk assess --answers file.json` with the same other flags. `floor_assessment` is the rules-only result, to show when answering fails.",
+  "type": "object",
+  "required": ["schema", "request_id", "model", "state", "questions", "floor_assessment"],
+  "properties": {
+    "schema": { "const": "brisk.host-request/v1" },
+    "request_id": { "type": "string", "description": "Hash of state and questions; copy it into the answers" },
+    "model": { "type": "string", "description": "Decision model the calibration expects, e.g. \"typesafe/jev\"" },
+    "state": { "description": "String or JSON object, at most 50,000 characters when serialised" },
+    "questions": {
+      "type": "object",
+      "maxProperties": 20,
+      "additionalProperties": {
+        "type": "object",
+        "required": ["type", "instructions"],
+        "properties": {
+          "type": { "enum": ["noul", "score"] },
+          "instructions": {},
+          "criteria": {}
+        }
+      }
+    },
+    "floor_assessment": { "$ref": "assessment.schema.json" }
+  }
+}

@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ronny/brisk/schema/assessment.schema.json",
+  "title": "brisk assessment",
+  "description": "Printed by `brisk assess --format json`.",
+  "type": "object",
+  "required": ["schema", "tier", "floor", "impact", "uncertainty", "action", "reasons", "stats", "provenance"],
+  "$defs": {
+    "tier": { "enum": ["low", "medium", "high"] }
+  },
+  "properties": {
+    "schema": { "const": "brisk.assessment/v1" },
+    "tier": { "$ref": "#/$defs/tier" },
+    "floor": { "$ref": "#/$defs/tier", "description": "Minimum tier set by rules; tier is never below it" },
+    "impact": { "type": "number", "minimum": 0, "maximum": 3, "description": "How costly a mistake would be" },
+    "uncertainty": { "type": "number", "minimum": 0, "maximum": 3, "description": "How weakly the change was verified" },
+    "action": { "type": "string", "description": "What the user should do, one sentence" },
+    "reasons": {
+      "type": "array",
+      "maxItems": 3,
+      "items": {
+        "type": "object",
+        "required": ["text", "source", "id", "tier"],
+        "properties": {
+          "text": { "type": "string" },
+          "source": { "enum": ["rule", "language", "question", "context", "session"] },
+          "id": { "type": "string" },
+          "tier": { "$ref": "#/$defs/tier" },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["path"],
+              "properties": {
+                "path": { "type": "string" },
+                "start_line": { "type": "integer" },
+                "end_line": { "type": "integer" },
+                "symbol": { "type": "string" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "stats": {
+      "type": "object",
+      "required": ["files", "additions", "deletions"],
+      "properties": {
+        "files": { "type": "integer" },
+        "additions": { "type": "integer" },
+        "deletions": { "type": "integer" }
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "required": ["brisk_version", "backend", "base", "diff_hash", "rule_hits", "duration_ms"],
+      "properties": {
+        "brisk_version": { "type": "string" },
+        "backend": { "enum": ["openrouter", "host", "rules-only"] },
+        "model": { "type": "string" },
+        "calibration": { "type": "string" },
+        "degraded": { "type": "string", "description": "Set when a model backend failed and brisk fell back to rules only" },
+        "base": { "type": "string" },
+        "head": { "type": "string" },
+        "diff_hash": { "type": "string" },
+        "rule_hits": { "type": "array", "items": { "type": "string" } },
+        "findings": { "type": "array", "items": { "type": "object" } },
+        "answers": { "type": "object", "additionalProperties": { "$ref": "answer.schema.json" } },
+        "model_risk": { "type": "number" },
+        "usage": { "type": "object" },
+        "duration_ms": { "type": "integer" },
+        "timings_ms": { "type": "object", "additionalProperties": { "type": "number" } }
+      }
+    }
+  }
+}
