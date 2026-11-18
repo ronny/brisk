@@ -6,7 +6,7 @@ brisk adds little for a team that already reviews every change by hand, beyond t
 
 ## Install
 
-Download a pinned binary for your platform from [Releases](https://github.com/ronny/brisk/releases). Releases are tagged `vYYYYMMDD-NN` (the Melbourne date and a sequence number) and ship static binaries for linux, darwin and windows on amd64 and arm64, with `SHA256SUMS`. `brisk --version` and every assessment's `provenance.brisk_version` report the tag; a build from source reports `dev-<commit>`.
+Download a pinned binary for your platform from [Releases](https://github.com/ronny/brisk/releases). Releases are tagged with semantic versions (`vX.Y.Z`, starting at `v0.1.0`) and ship static binaries for linux, darwin and windows on amd64 and arm64, with `SHA256SUMS`. `brisk --version` and every assessment's `provenance.brisk_version` report the tag; a build from source reports `dev-<commit>`.
 
 ## Usage
 

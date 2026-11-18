@@ -21,7 +21,7 @@ import (
 	"github.com/ronny/brisk/rules"
 )
 
-// Version is the release tag, such as v20261118-01, set at build time
+// Version is the release tag, a semantic version such as v0.1.0, set at build time
 // with -ldflags "-X github.com/ronny/brisk/assess.Version=<tag>". Other
 // builds report dev plus the commit they were built from.
 var Version = "dev"

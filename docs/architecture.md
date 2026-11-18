@@ -92,7 +92,7 @@ The model only scores each area 0–3 in a second call on the same state, made b
 `human_check` does not perform review or prove approval.
 
 The CLI appends each assessment to `<git-common-dir>/brisk/assessments.jsonl`, outside the worktree, with the changed paths, `human_check` and provenance, so real use can serve as an evaluation. `BRISK_LOG` sets another file or `off`.
-`provenance.brisk_version` is the release tag (`vYYYYMMDD-NN`, Melbourne date) for release binaries, or `dev-<revision>` for other builds. A tag push builds static binaries for six platforms and attaches them to a GitHub release.
+`provenance.brisk_version` is the release tag (a semantic version, `vX.Y.Z`) for release binaries, or `dev-<revision>` for other builds. A tag push builds static binaries for six platforms and attaches them to a GitHub release.
 
 Policy provenance includes:
 
