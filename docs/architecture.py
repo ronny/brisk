@@ -74,8 +74,8 @@ class Diagram:
 
 
 def runtime():
-    d = Diagram("Brisk rates the risk of a code change",
-                "One independent core. Rules set a floor that the model cannot lower.", 735)
+    d = Diagram("Brisk tells you when a change needs a person",
+                "Every change gets one review. Rules set a floor that the model cannot lower.", 735)
 
     d.box(400, 125, 400, 95, "Harness adapters", [
         "Amp captures session context and shows results.",
@@ -91,9 +91,9 @@ def runtime():
         "Model can raise risk, never lower the rule floor.",
         "Works without a harness or a model."], blue=True)
     d.box(860, 295, 300, 145, "Assessment", [
-        "Low / Medium / High",
-        "Reasons, evidence and next action",
-        "Human check: ask a person? + what to ask",
+        "Human check: ask a person, what to ask",
+        "Review plan for the agent review",
+        "Low / Medium / High, reasons, evidence",
         "Provenance records the applied policy"], blue=True)
 
     d.edge("600,220 600,295", "calls CLI + supplies session", (700, 263))

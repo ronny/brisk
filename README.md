@@ -1,8 +1,55 @@
 # brisk
 
-brisk assumes every change made by a coding agent gets one agent review before it ships. It tells you when a person should look too, and what to think about: `human_check` says whether to bring a person in, with at most two questions for them. Underneath, it rates how risky the change is (Low, Medium, or High, with up to three evidence-backed reasons). It is one static Go binary that needs only git 2.42 or later. Path and diff rules set the minimum tier; a decision model (TypeSafe's Jev) can only raise it.
+brisk tells you which changes made by a coding agent need a person to look at them. It assumes every change already gets one review, usually by another agent, before it ships. For each change, `human_check` says whether to bring a person in too, and gives them at most two questions to think about. A preset sets how often it asks: `light`, `balanced` (the default) or `careful`.
 
-brisk adds little for a team that already reviews every change by hand, beyond the questions it asks.
+Underneath, brisk rates how risky the change is: Low, Medium or High, with up to three evidence-backed reasons. Path and diff rules set the minimum tier, and a decision model, TypeSafe's Jev, can only raise it. brisk is one static Go binary that needs only git 2.42 or later. It runs from the command line, in CI, or in Amp through the [Amp plugin](adapters/amp/README.md).
+
+For a change that removes an access check from a Go handler, brisk prints:
+
+```text
+Risk: HIGH (rules floor: high)  impact 3.0/3  uncertainty 3.0/3
+1 files, +0 -5
+  - Changes logic inside an access check [language lang:auth_logic_changed]
+      backend/internal/web/documents.go:13 (*Server).EditDocument
+  - May weaken access checks (model: 0.97) [question weakens_auth]
+  - High impact if wrong (model: 3.0 of 3) [question impact]
+Action: After the agent review, ask a person to think through the points under human_check before shipping.
+Bring a person in: The change is High risk.
+  ? Who should be allowed to do this, and does the change still enforce it?
+```
+
+The [explainer](docs/explainer/index.html) walks six example changes like this one through brisk. Download it and open it in a browser. [docs/architecture.md](docs/architecture.md) describes the design and its trust boundaries.
+
+## Why brisk?
+
+Most changes an agent makes are fine after one review, and a few need a person. brisk's main job is to pick out those few: it flags the changes that need your attention, says why, and tells you what to think about. We expect most teams to use it this way.
+
+A team that does not run an agent review on every change, for example to save cost, can use brisk one level down. The tier and the review plan (`agent_review.plan`) say when an agent review is worth running and what it should check, such as access checks or stored data. We expect this to be the rarer case.
+
+A team that already reviews every change by hand gets little from brisk beyond its questions.
+
+### Why not let the coding agent flag its own changes?
+
+The coding agent could decide for itself when to ask you. brisk is a separate binary with fixed rules and a separate model for these reasons:
+
+- **It always runs.** The Amp plugin assesses every change before Ship, so a check does not depend on the agent remembering to make one.
+- **It is a second opinion.** The agent that wrote the change would be grading its own work. Jev sees only the change and a short record of the session, and answers fixed questions about it.
+- **It is consistent.** The rules fire the same way on every run. Jev gives nearly the same answer for the same change: on 200 changes from the evaluation, each scored five times, the model risk moved by at most 0.008 for 95% of them, and 1 of the 200 changed tier. This was measured before brisk asked `follow_up_fix`, and has not been rerun since.
+- **It is tuned on real history.** Jev's answers are weighted against past changes that later needed a fix, so brisk ranks changes better than its rules alone. On the evaluation's held-out changes, its PR-AUC is 0.356, against 0.283 for the rules alone and 0.15 for a random order.
+- **It is not tied to Amp.** The same binary runs in CI, from a script, or under another agent through the [host backend](#host-backend).
+
+We have not yet measured brisk against the coding agent's own judgement. The evaluation compares brisk with its own rules and with diff size, not with an agent asked to flag its own changes. The assessment log (see [Usage](#usage)) records every decision, so real use can answer this.
+
+## How it works
+
+1. **Collect the change.** brisk diffs the change against its base commit, including uncommitted and untracked files, and reads an optional record of the agent's session. All of it is evidence, not instructions.
+2. **Set a floor with rules.** Path, diff and session rules, structural findings from tree-sitter parsers for Go and TypeScript, and the team's own rules in the base commit's `.brisk.yaml` each have a tier. The highest tier hit is the floor, such as High for removed access-check logic or destructive SQL.
+3. **Ask Jev fixed questions.** brisk sends Jev a budgeted summary of the change, with secrets redacted, and seven questions: impact, uncertainty, four yes/no risk flags, and whether the change will need a bug fix within two weeks. A calibration table, fitted on past changes, turns change size and the answers into a model tier. The final tier is the higher of the floor and the model tier, so Jev can raise the tier but never lower it. Without a model, brisk uses the rules alone.
+4. **Plan the review.** Each rule hit, model override that fired, and answer that asks for a person adds a review area, such as access checks or stored data, with checks from brisk's fixed catalog or the team's `review_checks`. In a second call, Jev scores each area 0–3; brisk drops areas below 1 unless a High rule or override requires them, and orders the rest by score.
+5. **Decide on a person.** The preset's conditions (a tier, a rule hit, a strong answer, or high uncertainty) decide `human_check.needed`. The top review areas supply its one or two questions.
+6. **Report and log.** brisk prints the assessment as text or JSON and appends it to the local assessment log. In CI, `--fail-on` turns the tier into an exit code. In Amp, the plugin labels the thread, guides the agent review, and asks a person before Ship when `human_check` says so.
+
+The [explainer](docs/explainer/index.html) steps through each stage with real examples, and [docs/architecture.md](docs/architecture.md) covers the trust boundaries.
 
 ## Install
 
@@ -18,15 +65,19 @@ brisk assess [--repo DIR] [--base REF] [--head REF] [--session session.json] \
 
 - `--base` defaults to the merge base with `origin/HEAD`, else `main`, else `master`.
 - Without `--head`, brisk assesses the working tree, including untracked files (it never changes the real index).
-- Git reads no attributes from the repository's `.gitattributes` files, so a change cannot hide code by marking it binary or run a clean filter. Only `$GIT_DIR/info/attributes` applies.
-- In the working tree, untracked code files that only a `.gitignore` line added by the change ignores are assessed anyway and flagged (`gitignore_hides_code`).
-- A new file is analysed even when its name or a `Code generated … DO NOT EDIT` comment says it is generated, but its language findings set at most a Medium floor. Files that were already generated before the change, and lockfiles, are skipped, unless the session's `files_touched` shows the agent edited them with its own tools (`generated_hand_edited`). Edits made through the shell, such as `sed -i`, do not appear in `files_touched` and are not caught.
-- Trust boundary: brisk treats everything in the working tree and the assessed commits as written by the agent, and trusts `.git/` (config, hooks, `info/attributes`, `info/exclude`). An agent that can write to `.git/` can change how git reads the repository; brisk does not defend against that.
-- Before anything goes to a model, brisk replaces values that look like secrets with `[redacted secret]` and leaves out private key bodies and credential files such as `.env`.
+- `--session` takes a record of the agent's session ([schema](schema/session.schema.json)): the user's intent, the files it touched, the commands it ran. It is evidence, not instructions.
 - `--backend auto` (the default) uses OpenRouter when `OPENROUTER_API_KEY` is set and rules only otherwise. `BRISK_MODEL` overrides the model (default `typesafe/jev-1.14`).
 - If the model backend fails, brisk falls back to rules only and says so in `provenance.degraded`.
 - Exit codes: 0 assessed, 1 error, 2 usage error, 3 tier at or above `--fail-on`.
 - Every assessment is appended to `.git/brisk/assessments.jsonl` (never committed) with the changed paths, the `human_check` decision and its questions, and the provenance, so you can judge brisk on your own history later. `BRISK_LOG=<file>` writes it elsewhere; `BRISK_LOG=off` turns it off.
+
+### What brisk trusts
+
+- Trust boundary: brisk treats everything in the working tree and the assessed commits as written by the agent, and trusts `.git/` (config, hooks, `info/attributes`, `info/exclude`). An agent that can write to `.git/` can change how git reads the repository; brisk does not defend against that.
+- Git reads no attributes from the repository's `.gitattributes` files, so a change cannot hide code by marking it binary or run a clean filter. Only `$GIT_DIR/info/attributes` applies.
+- In the working tree, untracked code files that only a `.gitignore` line added by the change ignores are assessed anyway and flagged (`gitignore_hides_code`).
+- A new file is analysed even when its name or a `Code generated … DO NOT EDIT` comment says it is generated, but its language findings set at most a Medium floor. Files that were already generated before the change, and lockfiles, are skipped, unless the session's `files_touched` shows the agent edited them with its own tools (`generated_hand_edited`). Edits made through the shell, such as `sed -i`, do not appear in `files_touched` and are not caught.
+- Before anything goes to a model, brisk replaces values that look like secrets with `[redacted secret]` and leaves out private key bodies and credential files such as `.env`.
 
 ### Output
 
@@ -39,7 +90,7 @@ The [assessment](schema/assessment.schema.json) (`brisk.assessment/v2`) leads wi
   "reason": "The change is High risk.",
   "consider": [
     {"id": "access_checks", "text": "Who should be allowed to do this, and does the change still enforce it?",
-     "source": "brisk", "evidence": [{"path": "internal/web/documents.go", "start_line": 12, "symbol": "(*Server).editDocument"}]}
+     "source": "brisk", "evidence": [{"path": "backend/internal/web/documents.go", "start_line": 13, "end_line": 16, "symbol": "(*Server).EditDocument"}]}
   ]
 }
 ```

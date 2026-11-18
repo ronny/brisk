@@ -1,8 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg"
   width="1200" height="735" viewBox="0 0 1200 735"
   role="img" aria-labelledby="title description">
-<title id="title">Brisk rates the risk of a code change</title>
-<desc id="description">One independent core. Rules set a floor that the model cannot lower.</desc>
+<title id="title">Brisk tells you when a change needs a person</title>
+<desc id="description">Every change gets one review. Rules set a floor that the model cannot lower.</desc>
 <defs>
   <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5"
     markerWidth="7" markerHeight="7" orient="auto-start-reverse">
@@ -15,8 +15,8 @@
 </defs>
 <rect width="1200" height="735" fill="white"/>
 <g font-family="DejaVu Sans, sans-serif" fill="#17243b">
-<text x="40" y="48" font-size="25" fill="#17243b" font-weight="600" text-anchor="start">Brisk rates the risk of a code change</text>
-<text x="40" y="79" font-size="15" fill="#526078" font-weight="400" text-anchor="start">One independent core. Rules set a floor that the model cannot lower.</text>
+<text x="40" y="48" font-size="25" fill="#17243b" font-weight="600" text-anchor="start">Brisk tells you when a change needs a person</text>
+<text x="40" y="79" font-size="15" fill="#526078" font-weight="400" text-anchor="start">Every change gets one review. Rules set a floor that the model cannot lower.</text>
 <rect x="400" y="125" width="400" height="95" rx="8" fill="white" stroke="#aab5c5" stroke-width="1"/>
 <text x="418" y="154" font-size="16" fill="#17243b" font-weight="600" text-anchor="start">Harness adapters</text>
 <text x="418" y="182" font-size="13" fill="#526078" font-weight="400" text-anchor="start">Amp captures session context and shows results.</text>
@@ -35,9 +35,9 @@
 <text x="418" y="418" font-size="13" fill="#526078" font-weight="400" text-anchor="start">Works without a harness or a model.</text>
 <rect x="860" y="295" width="300" height="145" rx="8" fill="white" stroke="#245bcb" stroke-width="1.7"/>
 <text x="878" y="324" font-size="16" fill="#17243b" font-weight="600" text-anchor="start">Assessment</text>
-<text x="878" y="352" font-size="13" fill="#526078" font-weight="400" text-anchor="start">Low / Medium / High</text>
-<text x="878" y="374" font-size="13" fill="#526078" font-weight="400" text-anchor="start">Reasons, evidence and next action</text>
-<text x="878" y="396" font-size="13" fill="#526078" font-weight="400" text-anchor="start">Human check: ask a person? + what to ask</text>
+<text x="878" y="352" font-size="13" fill="#526078" font-weight="400" text-anchor="start">Human check: ask a person, what to ask</text>
+<text x="878" y="374" font-size="13" fill="#526078" font-weight="400" text-anchor="start">Review plan for the agent review</text>
+<text x="878" y="396" font-size="13" fill="#526078" font-weight="400" text-anchor="start">Low / Medium / High, reasons, evidence</text>
 <text x="878" y="418" font-size="13" fill="#526078" font-weight="400" text-anchor="start">Provenance records the applied policy</text>
 <polyline points="600,220 600,295" fill="none" stroke="#526078" stroke-width="1.2" marker-end="url(#arrow)"/>
 <g paint-order="stroke" stroke="white" stroke-width="5">

@@ -1,6 +1,6 @@
 # Brisk architecture
 
-Brisk combines deterministic evidence with optional model answers. The model can raise the risk tier, but it cannot lower the rule floor.
+Brisk assumes every change made by a coding agent already gets one review, and decides whether a person should look too (`human_check`). To decide, it combines deterministic evidence with optional model answers into a risk tier. The model can raise the tier, but it cannot lower the rule floor.
 
 ![Brisk overview: inputs, independent core, pluggable analysis, and assessment](architecture.svg)
 
@@ -8,9 +8,21 @@ Brisk combines deterministic evidence with optional model answers. The model can
 
 The overview shows the main components. Implementation details and the separate evaluation diagram follow below.
 
+## What brisk decides
+
+The assessment (`brisk.assessment/v2`) leads with `human_check: { needed, why, reason, consider }`: whether a person should look too, and at most two things for them to think about. The host request's `floor_assessment` carries it too.
+
+- `human_check` is independent of the tier: a Medium change can need a person, and a High one can be left to the agent review under the `light` preset.
+- Its conditions are ORed: a tier, a rule hit, a strong model answer, or high uncertainty. They use existing answers and rule hits, without another model call.
+- `reason` is brisk's fixed text. `consider` takes the top review areas' questions from a fixed catalog, or the team's own `review_checks`, so it never carries model or repository text.
+- `agent_review` guides the one review every change gets: `plan` lists review areas with evidence and checks, most important first, and `context_files` names the business-rules file.
+- `human_check` does not perform review or prove approval.
+
+The tier, floor, reasons and action are the score underneath. A team without an agent review on every change can use the tier and plan to decide when to run one.
+
 ## Scope and status
 
-This snapshot includes `human_check` (whether a person should look too), policy presets, the agent review plan, the local assessment log, versioned releases, and project rules (`content_rules` and project `questions`) from the [core thread](https://ampcode.com/threads/T-01a1e74a-81c7-76ef-8fa3-ac7baacb2a0f). The overview shows the implemented MVP shape.
+This document describes release v0.1.0: `human_check`, policy presets, the agent review plan, the local assessment log, versioned releases, and project rules (`content_rules`, project `questions` and a business-rules file). The overview shows the implemented MVP shape.
 Additional implementations are interface-only. The input box identifies untrusted evidence.
 
 | Part | MVP implementation | Extension boundary |
@@ -48,7 +60,7 @@ It binds host answers to the complete diff and base, beyond the clipped model st
 The Amp adapter restricts binary selection and control policy to trusted user or managed config.
 The adapter does not execute an assessor chosen by the candidate repository.
 
-### Host route
+## Host route
 
 1. The harness runs `brisk assess --backend host --format json`.
 2. The CLI returns `brisk.host-request/v1`, including state, questions, request ID, and `floor_assessment`.
@@ -59,7 +71,7 @@ The adapter does not execute an assessor chosen by the candidate repository.
 An empty change can return an assessment directly. The harness can show `floor_assessment` when model answering fails.
 The direct route calls Jev through OpenRouter. The rules-only route makes no model call.
 
-### Policy and agent review
+## Policy and agent review
 
 Base-commit `.brisk.yaml` controls policy. Its optional keys are:
 
@@ -83,16 +95,13 @@ A fired project question shows its configured `reason`. `human_check.reason` sta
 
 Brisk asks seven typed questions of its own, including `follow_up_fix`, a yes/no forecast of a bug fix within two weeks, which the jev-1.14 calibration weights with size and impact.
 Calibration remains specific to the answering model version. Rule floors and overrides can exceed the requested model-only shares.
-`human_check` conditions are ORed. They use existing answers and rule hits, without another model call.
 
-Brisk assumes every change gets one agent review. The assessment (`brisk.assessment/v2`) leads with `human_check: { needed, why, reason, consider }`, including the host request's `floor_assessment`: whether a person should look too, and at most two things for them to think about.
-`human_check` is independent of the tier: a Medium change can need a person, and a High one can be left to the agent review under the `light` preset.
-`agent_review` guides that review: `plan` lists review areas with evidence and checks, most important first, and `context_files` names the business-rules file. Area and check text come from brisk's catalog or the base config's `review_checks`, never from the model. `human_check.consider` takes the top areas' questions from a fixed catalog, so it never carries model or repository text.
+Review plan areas and checks come from brisk's catalog or the base config's `review_checks`, never from the model.
 The model only scores each area 0–3 in a second call on the same state, made by default for every change, alongside the main call (`agent_review.tailor_plan: always`). Its cost is added to `provenance.usage`, and `provenance.review_plan.status` separates tailored, not asked, pending and failed. Low-scoring areas that no High rule or override requires are dropped. Without those answers the plan is brisk's full list.
-`human_check` does not perform review or prove approval.
 
 The CLI appends each assessment to `<git-common-dir>/brisk/assessments.jsonl`, outside the worktree, with the changed paths, `human_check` and provenance, so real use can serve as an evaluation. `BRISK_LOG` sets another file or `off`.
-`provenance.brisk_version` is the release tag (a semantic version, `vX.Y.Z`) for release binaries, or `dev-<revision>` for other builds. A tag push builds static binaries for six platforms and attaches them to a GitHub release.
+`provenance.brisk_version` is the release tag (a semantic version, `vX.Y.Z`) for release binaries, or `dev-<revision>` for other builds. A tag push builds static binaries for six platforms in parallel and attaches them to a GitHub release.
+A manual run of the release workflow is a dry run: it tests and builds every target as `dev-<commit>` and publishes nothing.
 
 Policy provenance includes:
 
@@ -114,6 +123,9 @@ The offline evaluator prepares historical changes with the same engine that the 
 It compares scores against noisy outcome labels from reverts, subsequent fixes, and optional supplied CI failures.
 It separates training and held-out changes for calibration and evaluation.
 `brisk-eval human` measures, per preset, how often brisk asks for a person, how many bad changes it asks about, and whether its questions point at the files a later fix touched. The first numbers are preliminary; real use, through the assessment log, is the ongoing evaluation.
+On the held-out changes of the two evaluation repositories, brisk's PR-AUC is 0.356, against 0.283 for its rules alone.
+A stability sample scores 200 changes five times each: the model risk moved by at most 0.008 for 95% of them, and 1 changed tier. It predates `follow_up_fix`.
+The evaluation does not yet compare brisk with a coding agent asked to flag its own changes.
 
 Fixture tests replay committed Jev answers without network access, an API key, or model cost.
 A changed model request requires a new recording. Tests fail rather than silently ask the live model.

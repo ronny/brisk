@@ -142,7 +142,7 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
 <body>
 <header>
   <h1>How brisk works</h1>
-  <p class="lede">brisk assumes every change made by a coding agent gets one agent review, and tells you when a person should look too, with at most two questions for them (<span class="mono">human_check</span>). Underneath, it rates the change <span class="tier low">Low</span> <span class="tier medium">Medium</span> <span class="tier high">High</span> with up to three reasons. Rules set a floor. A decision model, TypeSafe's Jev, can only raise the tier above that floor. The example is <b>shelf</b>, a repo with a Go backend and a React/TypeScript frontend. Every example assessment on this page is real output from brisk (the core thread's local <span class="mono">main</span>, ffdba60) and Jev (<span class="mono">jev-1.14.0</span>, through Amp).</p>
+  <p class="lede">brisk tells you which changes made by a coding agent need a person to look at them. It assumes every change already gets one review, and for each change says whether to bring a person in too, with at most two questions for them (<span class="mono">human_check</span>). Underneath, it rates the change <span class="tier low">Low</span> <span class="tier medium">Medium</span> <span class="tier high">High</span> with up to three reasons. Rules set a floor. A decision model, TypeSafe's Jev, can only raise the tier above that floor. The example is <b>shelf</b>, a repo with a Go backend and a React/TypeScript frontend. Every example assessment on this page is real output from brisk (<span class="mono">v0.1.0</span>) and Jev (<span class="mono">jev-1.14.0</span>, through Amp).</p>
 </header>
 <nav><div class="in">
   <a href="#flows">1 · Flows</a>
@@ -223,7 +223,7 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
 </section>
 
 <footer>
-  Sources: brisk <span class="mono">main</span> at the release that added <span class="mono">human_check</span> (presets <span class="mono">light</span>, <span class="mono">balanced</span>, <span class="mono">careful</span>; the always-on agent review; the plugin's needs-human dialog, labels and assessment artifact), built in the core thread and the language and plugin thread; the MVP plan, investigation, and evaluation (revision 6) artifacts, as of 17 Nov 2026. The example data comes from <span class="mono">docs/explainer/example.sh</span>: it builds the shelf repo, runs brisk on each change, gets Jev's answers, scores them under each preset, and embeds the results here with <span class="mono">embed.py</span>. The page checks that its own tier and <span class="mono">human_check</span> logic gives the same results as brisk for every example and preset.
+  Sources: brisk <span class="mono">v0.1.0</span>, the release that added <span class="mono">human_check</span> (presets <span class="mono">light</span>, <span class="mono">balanced</span>, <span class="mono">careful</span>; the always-on agent review; the plugin's needs-human dialog, labels and assessment artifact), built in the core thread and the language and plugin thread; the MVP plan, investigation, and evaluation (revision 6) artifacts, as of 17 Nov 2026. The example data comes from <span class="mono">docs/explainer/example.sh</span>: it builds the shelf repo, runs brisk on each change, gets Jev's answers, scores them under each preset, and embeds the results here with <span class="mono">embed.py</span>. The page checks that its own tier and <span class="mono">human_check</span> logic gives the same results as brisk for every example and preset.
 </footer>
 
 <script id="examples-data" type="application/json">
@@ -293,7 +293,7 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
      "deletions": 1
     },
     "provenance": {
-     "brisk_version": "dev-cde209eb99ce-dirty",
+     "brisk_version": "v0.1.0",
      "backend": "host",
      "model": "jev-1.14.0",
      "calibration": "jev-1.14",
@@ -301,7 +301,7 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
      "rule_hits": [],
      "findings": null,
      "model_risk": 0.081,
-     "duration_ms": 13,
+     "duration_ms": 18,
      "preset": "balanced",
      "thresholds": {
       "high": 0.771,
@@ -633,7 +633,7 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
      "deletions": 5
     },
     "provenance": {
-     "brisk_version": "dev-cde209eb99ce-dirty",
+     "brisk_version": "v0.1.0",
      "backend": "host",
      "model": "jev-1.14.0",
      "calibration": "jev-1.14",
@@ -653,7 +653,7 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
       }
      ],
      "model_risk": 0.524,
-     "duration_ms": 89,
+     "duration_ms": 103,
      "preset": "balanced",
      "thresholds": {
       "high": 0.771,
@@ -713,7 +713,7 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
      }
     }
    },
-   "text": "Risk: HIGH (rules floor: high)  impact 3.0/3  uncertainty 3.0/3\n1 files, +0 -5\n  - Changes logic inside an access check [language lang:auth_logic_changed]\n      backend/internal/web/documents.go:13 (*Server).EditDocument\n  - May weaken access checks (model: 0.97) [question weakens_auth]\n  - High impact if wrong (model: 3.0 of 3) [question impact]\nAction: After the agent review, ask a person to think through the points under human_check before shipping.\nBring a person in: The change is High risk.\n  ? Who should be allowed to do this, and does the change still enforce it?\n(host, jev-1.14.0, 79 ms)\n",
+   "text": "Risk: HIGH (rules floor: high)  impact 3.0/3  uncertainty 3.0/3\n1 files, +0 -5\n  - Changes logic inside an access check [language lang:auth_logic_changed]\n      backend/internal/web/documents.go:13 (*Server).EditDocument\n  - May weaken access checks (model: 0.97) [question weakens_auth]\n  - High impact if wrong (model: 3.0 of 3) [question impact]\nAction: After the agent review, ask a person to think through the points under human_check before shipping.\nBring a person in: The change is High risk.\n  ? Who should be allowed to do this, and does the change still enforce it?\n(host, jev-1.14.0, 89 ms)\n",
    "presets": {
     "light": {
      "tier": "high",
@@ -1205,7 +1205,7 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
      "deletions": 5
     },
     "provenance": {
-     "brisk_version": "dev-cde209eb99ce-dirty",
+     "brisk_version": "v0.1.0",
      "backend": "host",
      "model": "jev-1.14.0",
      "calibration": "jev-1.14",
@@ -1225,7 +1225,7 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
       }
      ],
      "model_risk": 0.305,
-     "duration_ms": 116,
+     "duration_ms": 119,
      "preset": "balanced",
      "thresholds": {
       "high": 0.771,
@@ -1285,7 +1285,7 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
      }
     }
    },
-   "text": "Risk: LOW  impact 1.2/3  uncertainty 0.1/3\n1 files, +13 -5\nAction: The agent review is enough.\n(host, jev-1.14.0, 93 ms)\n",
+   "text": "Risk: LOW  impact 1.2/3  uncertainty 0.1/3\n1 files, +13 -5\nAction: The agent review is enough.\n(host, jev-1.14.0, 64 ms)\n",
    "presets": {
     "light": {
      "tier": "low",
@@ -1620,7 +1620,7 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
      "deletions": 0
     },
     "provenance": {
-     "brisk_version": "dev-cde209eb99ce-dirty",
+     "brisk_version": "v0.1.0",
      "backend": "host",
      "model": "jev-1.14.0",
      "calibration": "jev-1.14",
@@ -1690,7 +1690,7 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
      }
     }
    },
-   "text": "Risk: MEDIUM (rules floor: medium)  impact 2.3/3  uncertainty 2.6/3\n2 files, +4 -0\n  - Changes a database migration [rule migration]\n      backend/internal/db/migrations/0007_archive_documents.down.sql, backend/internal/db/migrations/0007_archive_documents.up.sql\nAction: Make sure the agent review covers the listed reasons.\n(host, jev-1.14.0, 13 ms)\n",
+   "text": "Risk: MEDIUM (rules floor: medium)  impact 2.3/3  uncertainty 2.6/3\n2 files, +4 -0\n  - Changes a database migration [rule migration]\n      backend/internal/db/migrations/0007_archive_documents.down.sql, backend/internal/db/migrations/0007_archive_documents.up.sql\nAction: Make sure the agent review covers the listed reasons.\n(host, jev-1.14.0, 28 ms)\n",
    "presets": {
     "light": {
      "tier": "medium",
@@ -2185,7 +2185,7 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
      "deletions": 0
     },
     "provenance": {
-     "brisk_version": "dev-cde209eb99ce-dirty",
+     "brisk_version": "v0.1.0",
      "backend": "host",
      "model": "jev-1.14.0",
      "calibration": "jev-1.14",
@@ -2196,7 +2196,7 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
      ],
      "findings": null,
      "model_risk": 0.313,
-     "duration_ms": 14,
+     "duration_ms": 13,
      "preset": "balanced",
      "thresholds": {
       "high": 0.771,
@@ -2257,7 +2257,7 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
      }
     }
    },
-   "text": "Risk: HIGH (rules floor: high)  impact 3.0/3  uncertainty 2.8/3\n1 files, +1 -0\n  - Adds destructive SQL [rule destructive_sql]\n      backend/internal/db/migrations/0007_drop_owner.up.sql:1\n  - May delete or corrupt stored data (model: 0.97) [question destroys_data]\n  - High impact if wrong (model: 3.0 of 3) [question impact]\nAction: After the agent review, ask a person to think through the points under human_check before shipping.\nBring a person in: The change is High risk.\n  ? Is it safe to lose the data this deletes, and is there a way back if not?\n  ? What happens to existing data while this deploys, and how would you roll it back?\n(host, jev-1.14.0, 13 ms)\n",
+   "text": "Risk: HIGH (rules floor: high)  impact 3.0/3  uncertainty 2.8/3\n1 files, +1 -0\n  - Adds destructive SQL [rule destructive_sql]\n      backend/internal/db/migrations/0007_drop_owner.up.sql:1\n  - May delete or corrupt stored data (model: 0.97) [question destroys_data]\n  - High impact if wrong (model: 3.0 of 3) [question impact]\nAction: After the agent review, ask a person to think through the points under human_check before shipping.\nBring a person in: The change is High risk.\n  ? Is it safe to lose the data this deletes, and is there a way back if not?\n  ? What happens to existing data while this deploys, and how would you roll it back?\n(host, jev-1.14.0, 15 ms)\n",
    "presets": {
     "light": {
      "tier": "high",
@@ -2760,7 +2760,7 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
      "deletions": 1
     },
     "provenance": {
-     "brisk_version": "dev-cde209eb99ce-dirty",
+     "brisk_version": "v0.1.0",
      "backend": "host",
      "model": "jev-1.14.0",
      "calibration": "jev-1.14",
@@ -2826,7 +2826,7 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
      }
     }
    },
-   "text": "Risk: MEDIUM  impact 2.7/3  uncertainty 1.5/3\n1 files, +1 -1\n  - High impact if wrong (model: 2.7 of 3) [question impact]\nAction: Make sure the agent review covers the listed reasons.\nBring a person in: May weaken access checks (Jev: 0.72).\n  ? Who should be allowed to do this, and does the change still enforce it?\n(host, jev-1.14.0, 94 ms)\n",
+   "text": "Risk: MEDIUM  impact 2.7/3  uncertainty 1.5/3\n1 files, +1 -1\n  - High impact if wrong (model: 2.7 of 3) [question impact]\nAction: Make sure the agent review covers the listed reasons.\nBring a person in: May weaken access checks (Jev: 0.72).\n  ? Who should be allowed to do this, and does the change still enforce it?\n(host, jev-1.14.0, 106 ms)\n",
    "presets": {
     "light": {
      "tier": "medium",
@@ -3770,7 +3770,7 @@ function pSummary(ex){ const rs=ex.final.reasons.map(r=>r.text.replace(/\.$/,'')
 function pShip(ex){ if(ex.final.tier==='low') return null; return pSummary(ex)+' '+(ex.final.tier==='high'?'Before pushing, review the changes behind these reasons, fix anything wrong, and tell me what you checked.':'Before pushing, check the changes behind these reasons.'); }
 function pReview(ex){ const ev=e=>!e.start_line?e.path:(!e.end_line||e.end_line===e.start_line)?`${e.path}:${e.start_line}`:`${e.path}:${e.start_line}-${e.end_line}`;
   return [`brisk rated these changes ${TITLE[ex.final.tier]} risk. Review them before shipping:`, ...ex.final.reasons.map(r=>{const e=(r.evidence||[]).slice(0,3).map(ev); return '- '+(e.length?`${r.text} (${e.join(', ')})`:r.text);}), '', 'For each reason, read the code it points to and check whether the change is correct and covered by tests. Fix real problems, and tell me which reasons were false alarms.'].join('\n'); }
-// ---- review plan (assess/review.go on the core thread's local main)
+// ---- review plan (mirrors assess/review.go at v0.1.0)
 // Which area each rule, finding or fired override supports. Used only to draw
 // where an area came from; the areas themselves are brisk's real output.
 const REVIEW_AREA_FOR = {auth:'access_checks','lang:auth_logic_changed':'access_checks',weakens_auth:'access_checks',migration:'stored_data','lang:sql_changed':'stored_data',
@@ -4007,7 +4007,7 @@ function renderMetrics(){
 $('metrictabs').addEventListener('click',e=>{ const b=e.target.closest('button'); if(!b) return; metricKey=b.dataset.k; renderMetrics(); });
 
 // ---------------------------------------------------------------- section 3: levers
-// Mirrors assess/policy.go on the core thread's local main (ffdba60).
+// Mirrors assess/policy.go at v0.1.0.
 const DANGER = ['secret_added','tls_disabled','gitignore_hides_code','nested_repo','generated_without_source','generated_hand_edited'];
 const RULE_REVIEW_TEXT = {
   secret_added:'The change adds what looks like a secret.', tls_disabled:'The change turns off TLS certificate checks.',
