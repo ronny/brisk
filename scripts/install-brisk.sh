@@ -42,8 +42,8 @@ if ! "$dir/brisk" --version 2> /dev/null | grep -qx "brisk $tag"; then
   sum="$(grep " ${asset}\$" "$pin/SHA256SUMS")" || { echo "$asset is not in $pin/SHA256SUMS" >&2; exit 1; }
   tmp="$(mktemp -d)"
   trap 'rm -rf "$tmp"' EXIT
-  # gh carries the credentials in orbs and on runners while ronny/brisk is private.
-  gh release download "$tag" -R ronny/brisk -D "$tmp" -p "$asset"
+  # A public download: no token or gh (orb setup has no GH_TOKEN), and no API rate limit.
+  curl -fsSL --retry 3 -o "$tmp/$asset" "https://github.com/ronny/brisk/releases/download/$tag/$asset"
   if command -v sha256sum > /dev/null; then
     (cd "$tmp" && echo "$sum" | sha256sum -c -)
   else
