@@ -247,3 +247,4 @@ brisk-eval label -repo "$REPO_A" -name repo-a -out /tmp/eval/a.labels.jsonl
 | `calibration/` | Thresholds per backend and model version, as data |
 | `eval/`, `cmd/brisk-eval/` | Offline evaluation on git history |
 | `adapters/amp/` | The Amp plugin |
+| `.amp/plugins/brisk/`, `.brisk.yaml`, `scripts/install-brisk.sh` | How Amp threads on this repository are rated: a copy of `adapters/amp/` and the binary from the release in `BRISK_VERSION`, so a change to brisk's code does not change how it is rated. Changes to these files ask for a person |

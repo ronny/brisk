@@ -1,0 +1,233 @@
+// brisk settings come only from files the repository cannot write: the
+// user's Amp settings and the machine's managed settings. Amp's merged
+// configuration also includes the repository's .amp/settings.json, which a
+// change under assessment could edit to pick the binary that rates it, lower
+// the backend, or turn the Ship confirmation off.
+
+import { realpathSync } from 'node:fs'
+import { access, constants, readFile } from 'node:fs/promises'
+import { homedir, platform } from 'node:os'
+import { delimiter, isAbsolute, join, relative, resolve } from 'node:path'
+import type { Mode } from './brisk.ts'
+
+/**
+ * How the plugin runs the one agent review every change gets, from least to
+ * most automatic:
+ * - off: nothing.
+ * - suggest: a quick action only.
+ * - once-before-ship (default): makes sure one review ran on this version of
+ *   the changes before Ship: the Ship turn runs it unless one already ran.
+ * - before-ship: the Ship and Push to Branch turn always runs the review first.
+ * - after-turn: also starts the review as soon as the agent's turn ends.
+ */
+export const REVIEW_MODES = ['off', 'suggest', 'once-before-ship', 'before-ship', 'after-turn'] as const
+export type ReviewMode = (typeof REVIEW_MODES)[number]
+
+/**
+ * What the plugin does when brisk asks for a person (human_check.needed):
+ * - dialog (default): label the thread brisk-needs-human and, before Ship, show
+ *   the questions in a dialog a person answers.
+ * - note: label it and put the questions in the Ship prompt, no dialog.
+ * - off: neither; the risk label only.
+ */
+export const ASK_PERSON = ['dialog', 'note', 'off'] as const
+export type AskPerson = (typeof ASK_PERSON)[number]
+
+/**
+ * Plugin defaults per preset. The names match brisk's .brisk.yaml presets;
+ * the earlier names are aliases. Explicit settings override them.
+ */
+export const PRESETS: Record<string, { agentReview: ReviewMode; confirmShip: boolean }> = {
+	// One agent review before Ship, wherever it ran; a person only when brisk asks.
+	light: { agentReview: 'once-before-ship', confirmShip: false },
+	balanced: { agentReview: 'once-before-ship', confirmShip: false },
+	// A review on every Ship, and a person confirms changes brisk could not assess.
+	careful: { agentReview: 'before-ship', confirmShip: true },
+}
+export const PRESET_ALIASES: Record<string, string> = { autonomous: 'light', reviewed: 'balanced', strict: 'careful' }
+const DEFAULT_PRESET = 'balanced'
+
+export interface Settings {
+	bin: string
+	mode: Mode
+	base?: string
+	/** The trusted preset in effect. */
+	preset: string
+	/** Ask a person before Ship on changes brisk could not assess in this project. */
+	confirmShip: boolean
+	agentReview: ReviewMode
+	askPerson: AskPerson
+	/** When brisk asks for a person and nobody watches the thread: stop before pushing, or ship. */
+	unattended: 'stop' | 'ship'
+	/** Publish a "Brisk assessment" artifact in the thread after each assessment. */
+	artifact: boolean
+}
+
+/**
+ * What a repository's preset (from its base .brisk.yaml, reported by brisk
+ * as provenance.preset) raises agentReview to. balanced is also what brisk
+ * reports when the file names no preset, so it raises nothing. A repository
+ * cannot choose after-turn: it would let a cloned repository make the agent
+ * start turns on its own.
+ */
+export const PROJECT_RAISE: Record<string, ReviewMode> = { light: 'once-before-ship', careful: 'before-ship' }
+
+/**
+ * reviewMode is what to do about a recommended agent review: the user's
+ * setting, raised by the project's preset but never lowered, and never
+ * changed when the user turned agent review off.
+ */
+export function reviewMode(cfg: Settings, projectPreset?: string): ReviewMode {
+	const name = projectPreset && Object.hasOwn(PRESET_ALIASES, projectPreset) ? PRESET_ALIASES[projectPreset] : projectPreset
+	const project = name && Object.hasOwn(PROJECT_RAISE, name) ? PROJECT_RAISE[name] : undefined
+	if (!project || cfg.agentReview === 'off') return cfg.agentReview
+	return REVIEW_MODES.indexOf(project) > REVIEW_MODES.indexOf(cfg.agentReview) ? project : cfg.agentReview
+}
+
+/** Paths of the trusted settings files, lowest precedence first. */
+export function trustedFiles(home = process.env.HOME || homedir(), os = platform()): string[] {
+	const managed =
+		os === 'darwin'
+			? '/Library/Application Support/ampcode/managed-settings.json'
+			: os === 'win32'
+				? join(process.env.ProgramData ?? 'C:\\ProgramData', 'ampcode', 'managed-settings.json')
+				: '/etc/ampcode/managed-settings.json'
+	return [join(home, '.config', 'amp', 'settings.json'), join(home, '.config', 'amp', 'settings.jsonc'), managed]
+}
+
+/** stripJSONC removes comments and trailing commas outside strings. */
+export function stripJSONC(s: string): string {
+	let out = ''
+	for (let i = 0; i < s.length; i++) {
+		const c = s[i]
+		if (c === '"') {
+			let j = i + 1
+			while (j < s.length && s[j] !== '"') j += s[j] === '\\' ? 2 : 1
+			out += s.slice(i, j + 1)
+			i = j
+		} else if (c === '/' && s[i + 1] === '/') {
+			while (i < s.length && s[i] !== '\n') i++
+			out += '\n'
+		} else if (c === '/' && s[i + 1] === '*') {
+			i = s.indexOf('*/', i + 2)
+			if (i < 0) break
+			i++
+		} else out += c
+	}
+	return out.replace(/,(\s*[}\]])/g, '$1')
+}
+
+/** readTrusted merges the trusted files that exist; later files win. */
+export async function readTrusted(files = trustedFiles()): Promise<Record<string, unknown>> {
+	const merged: Record<string, unknown> = {}
+	for (const f of files) {
+		let text: string
+		try {
+			text = await readFile(f, 'utf8')
+		} catch {
+			continue
+		}
+		try {
+			Object.assign(merged, JSON.parse(stripJSONC(text)))
+		} catch {
+			// Unparseable: Amp rejects it too, so skip it.
+		}
+	}
+	return merged
+}
+
+/** real resolves symlinks in p as far as it exists. */
+function real(p: string): string {
+	try {
+		return realpathSync(p)
+	} catch {
+		return resolve(p)
+	}
+}
+
+function inside(path: string, root: string): boolean {
+	const r = relative(real(root), real(path))
+	return r === '' || (!r.startsWith('..') && !isAbsolute(r))
+}
+
+/**
+ * resolveBinary turns bin into an absolute path outside the project. A bare
+ * name is looked up on PATH, skipping relative entries and entries inside the
+ * project, which would otherwise let the change under assessment supply the
+ * binary that rates it.
+ */
+export async function resolveBinary(bin: string, root: string, path = process.env.PATH ?? ''): Promise<string> {
+	const candidates = isAbsolute(bin)
+		? [bin]
+		: path
+				.split(delimiter)
+				.filter((d) => d && isAbsolute(d) && !inside(d, root))
+				.flatMap((d) => (platform() === 'win32' ? ['.exe', '.cmd', ''].map((e) => join(d, bin + e)) : [join(d, bin)]))
+	for (const c of candidates) {
+		if (inside(c, root)) continue
+		try {
+			await access(c, constants.X_OK)
+			return c
+		} catch {}
+	}
+	throw new Error(`${bin} not found outside the project; set amp.brisk.binary in user settings`)
+}
+
+/**
+ * settingsFrom reads brisk's settings from trusted values (keys with the
+ * `amp.` prefix) for the project at root.
+ *
+ * - amp.brisk.binary: a bare command name looked up on PATH, or an absolute
+ *   (or ~/) path outside the project. Anything else falls back to `brisk`.
+ * - amp.brisk.preset: light, balanced (default), or careful (or the earlier
+ *   autonomous, reviewed, strict); sets the defaults of the next two keys.
+ * - amp.brisk.confirmUnassessed (earlier amp.brisk.confirmShipOnHigh): true
+ *   for every project, false, or a list of project roots to turn it on for.
+ * - amp.brisk.agentReview: one of REVIEW_MODES.
+ * - amp.brisk.askPerson: one of ASK_PERSON.
+ * - amp.brisk.unattended: stop (default) or ship.
+ * - amp.brisk.artifact: false stops the "Brisk assessment" artifact.
+ */
+export function settingsFrom(
+	c: Record<string, unknown>,
+	root: string,
+	env: Record<string, string | undefined> = process.env,
+	home = homedir(),
+): Settings {
+	const str = (k: string) => {
+		const v = c[`amp.brisk.${k}`]
+		return typeof v === 'string' && v ? v : undefined
+	}
+	let bin = str('binary') ?? 'brisk'
+	if (bin.startsWith('~/')) bin = join(home, bin.slice(2))
+	if (/[\\/]/.test(bin) && (!isAbsolute(bin) || inside(bin, root))) bin = 'brisk'
+
+	const backend = str('backend') ?? 'auto'
+	const mode: Mode =
+		backend === 'rules-only'
+			? 'rules-only'
+			: backend === 'openrouter'
+				? 'binary'
+				: backend === 'amp'
+					? 'amp'
+					: env.OPENROUTER_API_KEY
+						? 'binary'
+						: 'amp'
+
+	const named = str('preset') ?? ''
+	const alias = Object.hasOwn(PRESET_ALIASES, named) ? PRESET_ALIASES[named] : named
+	const preset = Object.hasOwn(PRESETS, alias) ? alias : DEFAULT_PRESET
+	const confirm = c['amp.brisk.confirmUnassessed'] ?? c['amp.brisk.confirmShipOnHigh']
+	const confirmShip =
+		confirm === undefined
+			? PRESETS[preset].confirmShip
+			: confirm === true ||
+				(Array.isArray(confirm) &&
+					confirm.some((p) => typeof p === 'string' && real(p.startsWith('~/') ? join(home, p.slice(2)) : p) === real(root)))
+	const review = str('agentReview')
+	const agentReview = (REVIEW_MODES as readonly string[]).includes(review ?? '') ? (review as ReviewMode) : PRESETS[preset].agentReview
+	const ask = str('askPerson')
+	const askPerson = (ASK_PERSON as readonly string[]).includes(ask ?? '') ? (ask as AskPerson) : 'dialog'
+	const unattended = str('unattended') === 'ship' ? 'ship' : 'stop'
+	return { bin, mode, base: str('base'), preset, confirmShip, agentReview, askPerson, unattended, artifact: c['amp.brisk.artifact'] !== false }
+}

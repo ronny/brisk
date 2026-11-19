@@ -1,0 +1,24 @@
+# brisk rates the changes Amp threads make to this repository, with the released binary and
+# plugin pinned in .amp/plugins/brisk/BRISK_VERSION. Read from the base commit.
+preset: light
+
+# The files that choose how brisk rates this repository: the plugin copy and its pin, the
+# script and orb setup that install the binary and its settings, and this file. A change to
+# them takes effect for later threads, so a person looks at it. Changes to rules/, risk/ or
+# adapters/amp/ do not change the pinned release and are rated like any other code.
+sensitive_paths:
+  - id: brisk_setup
+    paths: [".amp/plugins/**", ".agents/**", "scripts/install-brisk.sh", ".brisk.yaml"]
+    floor: high
+    reason: Changes how brisk rates this repository's own changes
+review_checks:
+  brisk_setup:
+    area: brisk's own setup
+    checks:
+      - Does .amp/plugins/brisk still match adapters/amp at the tag in BRISK_VERSION, with no local edits?
+      - Does BRISK_VERSION name a release, and does SHA256SUMS next to it match that release's own?
+      - Does the install script still refuse a binary that fails the committed SHA256SUMS or --version?
+      - Does the change weaken how brisk rates later changes, such as a lower preset or a lower rule tier?
+human_check:
+  # light's danger rules, plus brisk_setup. Setting rules replaces the preset's list.
+  rules: [secret_added, tls_disabled, gitignore_hides_code, nested_repo, generated_without_source, generated_hand_edited, brisk_setup]

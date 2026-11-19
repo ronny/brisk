@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Amp orb setup. Runs from the repository root on a fresh or stale orb, so it must be
+# idempotent and quick on a warm filesystem.
+set -euo pipefail
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
+
+# The binary and settings for the brisk plugin in .amp/plugins/brisk, at its pinned release.
+# Advisory only, so a failed download must not fail the orb: the plugin then labels threads
+# brisk-risk-unknown.
+echo "==> brisk"
+scripts/install-brisk.sh || echo "    WARNING: brisk not installed; see the output above" >&2
