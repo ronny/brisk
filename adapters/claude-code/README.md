@@ -45,7 +45,15 @@ An invalid value is reported after each turn, and every push then asks a person 
 
 ## Install
 
-1. Install a brisk release that has the `claude-code` command from [Releases](https://github.com/ronny/brisk/releases), and put it on `PATH` or set the `binary` option.
+1. Install brisk v0.2.0 or later, the first release with the `claude-code` command. Download the binary for your platform from [Releases](https://github.com/ronny/brisk/releases), named `brisk-<tag>-<os>-<arch>`, check it against the release's `SHA256SUMS`, and keep it outside your projects. For example, on an Apple silicon Mac:
+
+   ```sh
+   mkdir -p ~/.local/bin
+   curl -fsSL -o ~/.local/bin/brisk https://github.com/ronny/brisk/releases/download/v0.2.0/brisk-v0.2.0-darwin-arm64
+   chmod +x ~/.local/bin/brisk
+   ~/.local/bin/brisk --version   # brisk v0.2.0
+   ```
+
 2. In Claude Code, add this repository as a plugin marketplace and install the plugin:
 
    ```text
@@ -53,7 +61,17 @@ An invalid value is reported after each turn, and every push then asks a person 
    /plugin install brisk@brisk
    ```
 
-   To try a local checkout, run `claude --plugin-dir adapters/claude-code`.
+   To try a local checkout instead, start Claude Code with `claude --plugin-dir <checkout>/adapters/claude-code`.
+3. Set the plugin's options when Claude Code asks, or later in `/config` (see [Settings](#settings)):
+   - `binary`: the absolute path from step 1, such as `~/.local/bin/brisk`. Hooks may not get your shell's `PATH`, so a path is more reliable than `brisk`.
+   - `openrouter_api_key`: your OpenRouter key, so Jev answers brisk's questions. Without it the plugin runs rules only.
+   - Leave the others at their defaults to start.
+4. Try it in a git repository: ask Claude to change some code, then to push.
+   - After the turn, a `brisk: Risk …` message shows the tier, and brisk's questions when a person should look.
+   - The first push is denied, with brisk's review plan for Claude to work through.
+   - The next push shows Claude Code's permission prompt when brisk asks for a person; approve it to push.
+   - Nothing at all? The hook failed. `claude --debug` shows hook errors, such as `no brisk on PATH`.
+5. Add the `agent_config` rule from [What it cannot defend against](#what-it-cannot-defend-against) to the base `.brisk.yaml` of the repositories you use it in.
 
 The hook wrapper is a POSIX `sh` script, so on Windows the plugin needs Git Bash.
 

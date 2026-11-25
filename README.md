@@ -55,6 +55,8 @@ The [explainer](docs/explainer/index.html) steps through each stage with real ex
 
 Download a pinned binary for your platform from [Releases](https://github.com/ronny/brisk/releases). Releases are tagged with semantic versions (`vX.Y.Z`, starting at `v0.1.0`) and ship static binaries for linux, darwin and windows on amd64 and arm64, with `SHA256SUMS`. `brisk --version` and every assessment's `provenance.brisk_version` report the tag; a build from source reports `dev-<commit>`.
 
+To use brisk in Claude Code, follow [the Claude Code plugin's install steps](adapters/claude-code/README.md#install). For Amp, see [the Amp plugin](adapters/amp/README.md#install).
+
 ## Usage
 
 ```sh

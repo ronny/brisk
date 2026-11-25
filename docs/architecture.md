@@ -22,7 +22,7 @@ The tier, floor, reasons and action are the score underneath. A team without an 
 
 ## Scope and status
 
-This document describes release v0.1.0: `human_check`, policy presets, the agent review plan, the local assessment log, versioned releases, and project rules (`content_rules`, project `questions` and a business-rules file). The overview shows the implemented MVP shape.
+This document describes release v0.2.0: `human_check`, policy presets, the agent review plan, the local assessment log, versioned releases, project rules (`content_rules`, project `questions` and a business-rules file), and the Claude Code plugin. The overview shows the implemented MVP shape.
 Additional implementations are interface-only. The input box identifies untrusted evidence.
 
 | Part | MVP implementation | Extension boundary |
@@ -122,7 +122,7 @@ The Amp integration is advisory, not a universal gate on arbitrary `git push` co
 4. The hook prints a `systemMessage` for the person when the result changed. With `agent_review: after-turn` it also keeps Claude working once per diff for the review.
 5. On `PreToolUse` for a Bash command that pushes (`git push`, `gh pr create`, `gh pr merge`), it denies the first push of each diff with the review message, then returns `ask` when `human_check.needed`, so a person answers Claude Code's permission prompt. It never returns `allow`. Like the `Stop` hook, it rates the checked-out working tree against the base, not the commits being pushed.
 
-The Claude Code plugin is not in v0.1.0; it needs the next release.
+The Claude Code plugin needs brisk v0.2.0 or later.
 The plugin's options come from the user's Claude Code settings, and the wrapper skips `PATH` entries inside the project when it looks up the binary.
 Unlike Amp, Claude Code applies the project's `.claude/settings.json`, which can turn hooks off or set their environment. The adapter cannot defend against that. A `sensitive_paths` rule in the base `.brisk.yaml` can make such a change ask a person, and `--fail-on` in CI remains the hard gate.
 

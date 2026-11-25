@@ -9,7 +9,7 @@
     "binary": {
       "type": "string",
       "title": "brisk binary",
-      "description": "A command name looked up on PATH (skipping relative entries and entries inside the project), or an absolute or ~/ path outside the project. Needs a brisk release with the claude-code command.",
+      "description": "A command name looked up on PATH (skipping relative entries and entries inside the project), or an absolute or ~/ path outside the project. Needs brisk v0.2.0 or later.",
       "default": "brisk"
     },
     "base": {
