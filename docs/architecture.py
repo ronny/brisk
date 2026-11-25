@@ -78,8 +78,8 @@ def runtime():
                 "Every change gets one review. Rules set a floor that the model cannot lower.", 735)
 
     d.box(400, 125, 400, 95, "Harness adapters", [
-        "Amp captures session context and shows results.",
-        "Other harnesses: interface-only"])
+        "Amp plugin and Claude Code plugin capture",
+        "session context and show results."])
     d.box(40, 295, 300, 145, "Inputs · untrusted", [
         "Diff against a base commit",
         "Optional session record",

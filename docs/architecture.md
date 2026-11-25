@@ -31,9 +31,10 @@ Additional implementations are interface-only. The input box identifies untruste
 | Classifier | Jev through OpenRouter, host answers, rules-only | `risk.Backend` answers typed questions. Other classifiers are interface-only. |
 | Context | Base-commit `.brisk.yaml`, git history, CODEOWNERS | `risk.ContextProvider` supplies path and content rules, owners, and history. Other providers are interface-only. |
 | Language | Go, TypeScript, TSX, JavaScript | `risk.LanguageBackend` reports structural facts. Additional languages and LSP are interface-only. |
-| Harness | Amp directory plugin | Harness-neutral session JSON, CLI invocation, host request/answer JSON. Claude Code, Codex, and Pi adapters are interface-only. |
+| Harness | Amp directory plugin; Claude Code plugin (hooks calling `brisk claude-code`) | Harness-neutral session JSON, CLI invocation, host request/answer JSON. Codex and Pi adapters are interface-only. |
 
 The harness adapter is a protocol boundary, not a fourth Go interface.
+The Claude Code adapter's hook handler is a subcommand of the CLI (`cmd/brisk`), so it needs no runtime beyond the static binary. It uses the same Prepare, answer and log path as `brisk assess`; `risk/`, `assess/` and the assessment schema know nothing of it.
 The three Go interfaces live in `risk/`, which depends only on the standard library.
 The core runs without a harness or session record.
 
@@ -112,6 +113,18 @@ Policy provenance includes:
 A `policy_note` does not mean rules-only fallback. Backend failure remains separate in `provenance.degraded`.
 Trusted adapter policy controls review automation and the human-only Ship dialog. The Amp plugin labels the thread `brisk-risk-*` and `brisk-needs-human`, and keeps a Brisk assessment artifact in the thread.
 The Amp integration is advisory, not a universal gate on arbitrary `git push` commands.
+
+## Claude Code route
+
+1. On `Stop`, Claude Code runs the plugin's hook, which runs `brisk claude-code` with the hook input on stdin.
+2. brisk builds the session record from the transcript, prepares the change, and asks Jev through OpenRouter when a key is set, else uses rules only. Claude Code has no host route to Jev.
+3. It keeps the last assessment per session in `<git-common-dir>/brisk/claude-code/`, keyed by brisk version, backend, base and diff hash, so an unchanged diff costs no second model call. A degraded result is not reused.
+4. The hook prints a `systemMessage` for the person when the result changed. With `agent_review: after-turn` it also keeps Claude working once per diff for the review.
+5. On `PreToolUse` for a Bash command that pushes (`git push`, `gh pr create`, `gh pr merge`), it denies the first push of each diff with the review message, then returns `ask` when `human_check.needed`, so a person answers Claude Code's permission prompt. It never returns `allow`. Like the `Stop` hook, it rates the checked-out working tree against the base, not the commits being pushed.
+
+The Claude Code plugin is not in v0.1.0; it needs the next release.
+The plugin's options come from the user's Claude Code settings, and the wrapper skips `PATH` entries inside the project when it looks up the binary.
+Unlike Amp, Claude Code applies the project's `.claude/settings.json`, which can turn hooks off or set their environment. The adapter cannot defend against that. A `sensitive_paths` rule in the base `.brisk.yaml` can make such a change ask a person, and `--fail-on` in CI remains the hard gate.
 
 ## Evaluation and CI
 

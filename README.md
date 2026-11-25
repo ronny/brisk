@@ -2,7 +2,7 @@
 
 brisk tells you which changes made by a coding agent need a person to look at them. It assumes every change already gets one review, usually by another agent, before it ships. For each change, `human_check` says whether to bring a person in too, and gives them at most two questions to think about. A preset sets how often it asks: `light`, `balanced` (the default) or `careful`.
 
-Underneath, brisk rates how risky the change is: Low, Medium or High, with up to three evidence-backed reasons. Path and diff rules set the minimum tier, and a decision model, TypeSafe's Jev, can only raise it. brisk is one static Go binary that needs only git 2.42 or later. It runs from the command line, in CI, or in Amp through the [Amp plugin](adapters/amp/README.md).
+Underneath, brisk rates how risky the change is: Low, Medium or High, with up to three evidence-backed reasons. Path and diff rules set the minimum tier, and a decision model, TypeSafe's Jev, can only raise it. brisk is one static Go binary that needs only git 2.42 or later. It runs from the command line, in CI, in Amp through the [Amp plugin](adapters/amp/README.md), or in Claude Code through the [Claude Code plugin](adapters/claude-code/README.md).
 
 For a change that removes an access check from a Go handler, brisk prints:
 
@@ -32,11 +32,11 @@ A team that already reviews every change by hand gets little from brisk beyond i
 
 The coding agent could decide for itself when to ask you. brisk is a separate binary with fixed rules and a separate model for these reasons:
 
-- **It always runs.** The Amp plugin assesses every change before Ship, so a check does not depend on the agent remembering to make one.
+- **It always runs.** The Amp plugin assesses every change before Ship, and the Claude Code plugin after every turn, so a check does not depend on the agent remembering to make one.
 - **It is a second opinion.** The agent that wrote the change would be grading its own work. Jev sees only the change and a short record of the session, and answers fixed questions about it.
 - **It is consistent.** The rules fire the same way on every run. Jev gives nearly the same answer for the same change: on 200 changes from the evaluation, each scored five times, the model risk moved by at most 0.008 for 95% of them, and 1 of the 200 changed tier. This was measured before brisk asked `follow_up_fix`, and has not been rerun since.
 - **It is tuned on real history.** Jev's answers are weighted against past changes that later needed a fix, so brisk ranks changes better than its rules alone. On the evaluation's held-out changes, its PR-AUC is 0.356, against 0.283 for the rules alone and 0.15 for a random order.
-- **It is not tied to Amp.** The same binary runs in CI, from a script, or under another agent through the [host backend](#host-backend).
+- **It is not tied to Amp.** The same binary runs in CI, from a script, in Claude Code through its [plugin](adapters/claude-code/README.md), or under another agent through the [host backend](#host-backend).
 
 We have not yet measured brisk against the coding agent's own judgement. The evaluation compares brisk with its own rules and with diff size, not with an agent asked to flag its own changes. The assessment log (see [Usage](#usage)) records every decision, so real use can answer this.
 
@@ -47,7 +47,7 @@ We have not yet measured brisk against the coding agent's own judgement. The eva
 3. **Ask Jev fixed questions.** brisk sends Jev a budgeted summary of the change, with secrets redacted, and seven questions: impact, uncertainty, four yes/no risk flags, and whether the change will need a bug fix within two weeks. A calibration table, fitted on past changes, turns change size and the answers into a model tier. The final tier is the higher of the floor and the model tier, so Jev can raise the tier but never lower it. Without a model, brisk uses the rules alone.
 4. **Plan the review.** Each rule hit, model override that fired, and answer that asks for a person adds a review area, such as access checks or stored data, with checks from brisk's fixed catalog or the team's `review_checks`. In a second call, Jev scores each area 0–3; brisk drops areas below 1 unless a High rule or override requires them, and orders the rest by score.
 5. **Decide on a person.** The preset's conditions (a tier, a rule hit, a strong answer, or high uncertainty) decide `human_check.needed`. The top review areas supply its one or two questions.
-6. **Report and log.** brisk prints the assessment as text or JSON and appends it to the local assessment log. In CI, `--fail-on` turns the tier into an exit code. In Amp, the plugin labels the thread, guides the agent review, and asks a person before Ship when `human_check` says so.
+6. **Report and log.** brisk prints the assessment as text or JSON and appends it to the local assessment log. In CI, `--fail-on` turns the tier into an exit code. In Amp, the plugin labels the thread, guides the agent review, and asks a person before Ship when `human_check` says so. In Claude Code, the plugin shows the result after each turn, runs the agent review before a push, and asks a person in the permission prompt when `human_check` says so.
 
 The [explainer](docs/explainer/index.html) steps through each stage with real examples, and [docs/architecture.md](docs/architecture.md) covers the trust boundaries.
 

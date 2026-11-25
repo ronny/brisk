@@ -4283,7 +4283,8 @@ function renderPlugin(){
   <p class="small">Your <span class="mono">amp.brisk.agentReview</span>: <select id="umode">${['default',...MODES].map(m=>`<option ${m===LV.userMode?'selected':''}>${m}</option>`).join('')}</select> · repo preset: <b class="mono">${LV.preset}</b> (from the top card)</p>
   <div class="formula">mode = <b class="mono">${e.mode}</b></div><p class="small muted">${e.why}</p>
   <ol class="small">${steps.map(s=>`<li>${esc(s)}</li>`).join('')}</ol>
-  <p class="small muted">The person dialog, the Ship confirmation and the binary path are user-only settings; the repo's <span class="mono">.amp/settings.json</span> is ignored.</p>`;
+  <p class="small muted">The person dialog, the Ship confirmation and the binary path are user-only settings; the repo's <span class="mono">.amp/settings.json</span> is ignored.</p>
+  <p class="small muted">In Claude Code, the <a href="../../adapters/claude-code/README.md">Claude Code plugin</a> shows the result after each turn instead of a label, runs the same agent review before a push, and asks a person in Claude Code's permission prompt. It reaches Jev only through OpenRouter, and runs rules only without a key.</p>`;
   $('lv-plugin').querySelectorAll('[name=upre]').forEach(el=>el.onchange=()=>{ LV.userPreset=el.value; renderPlugin(); });
   $('umode').onchange=e=>{ LV.userMode=e.target.value; renderPlugin(); };
 }

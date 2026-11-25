@@ -19,8 +19,8 @@
 <text x="40" y="79" font-size="15" fill="#526078" font-weight="400" text-anchor="start">Every change gets one review. Rules set a floor that the model cannot lower.</text>
 <rect x="400" y="125" width="400" height="95" rx="8" fill="white" stroke="#aab5c5" stroke-width="1"/>
 <text x="418" y="154" font-size="16" fill="#17243b" font-weight="600" text-anchor="start">Harness adapters</text>
-<text x="418" y="182" font-size="13" fill="#526078" font-weight="400" text-anchor="start">Amp captures session context and shows results.</text>
-<text x="418" y="204" font-size="13" fill="#526078" font-weight="400" text-anchor="start">Other harnesses: interface-only</text>
+<text x="418" y="182" font-size="13" fill="#526078" font-weight="400" text-anchor="start">Amp plugin and Claude Code plugin capture</text>
+<text x="418" y="204" font-size="13" fill="#526078" font-weight="400" text-anchor="start">session context and show results.</text>
 <rect x="40" y="295" width="300" height="145" rx="8" fill="white" stroke="#aab5c5" stroke-width="1"/>
 <text x="58" y="324" font-size="16" fill="#17243b" font-weight="600" text-anchor="start">Inputs · untrusted</text>
 <text x="58" y="352" font-size="13" fill="#526078" font-weight="400" text-anchor="start">Diff against a base commit</text>
