@@ -23,6 +23,7 @@ import (
 var languageBackends = lang.Backends
 
 const usage = `usage: brisk assess [flags]
+       brisk claude-code < hook-input.json
        brisk version
 
 Rates how risky the change from --base to --head (or the working tree) is.
@@ -34,12 +35,12 @@ Flags:
 `
 
 func main() {
-	os.Exit(run(context.Background(), os.Args[1:], os.Stdout, os.Stderr))
+	os.Exit(run(context.Background(), os.Args[1:], os.Stdin, os.Stdout, os.Stderr))
 }
 
 type usageError struct{ error }
 
-func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
 		fmt.Fprint(stderr, usage)
 		return 2
@@ -59,6 +60,12 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 			return 1
 		}
 		return code
+	case "claude-code":
+		if len(args) > 1 {
+			fmt.Fprintf(stderr, "brisk: claude-code takes no arguments\n%s", usage)
+			return 2
+		}
+		return claudeCodeCmd(ctx, stdin, stdout, stderr)
 	}
 	fmt.Fprintf(stderr, "brisk: unknown command %q\n%s", args[0], usage)
 	return 2

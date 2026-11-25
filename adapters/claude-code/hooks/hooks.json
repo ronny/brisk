@@ -1,0 +1,20 @@
+{
+  "description": "brisk: assess the changes after each turn; before a push, run the agent review and ask a person when brisk says so",
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          { "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}\"/hooks/brisk-hook", "timeout": 120 }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          { "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}\"/hooks/brisk-hook", "timeout": 120 }
+        ]
+      }
+    ]
+  }
+}

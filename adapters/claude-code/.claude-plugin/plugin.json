@@ -1,0 +1,45 @@
+{
+  "name": "brisk",
+  "displayName": "brisk",
+  "description": "Assesses Claude's code changes after every turn and says when a person should look too, with the questions to think about. Before a push, runs one agent review guided by brisk's plan and asks a person in the permission prompt when brisk says so.",
+  "homepage": "https://github.com/ronny/brisk/tree/main/adapters/claude-code",
+  "repository": "https://github.com/ronny/brisk",
+  "keywords": ["review", "risk", "code-review"],
+  "userConfig": {
+    "binary": {
+      "type": "string",
+      "title": "brisk binary",
+      "description": "A command name looked up on PATH (skipping relative entries and entries inside the project), or an absolute or ~/ path outside the project. Needs a brisk release with the claude-code command.",
+      "default": "brisk"
+    },
+    "base": {
+      "type": "string",
+      "title": "Base ref",
+      "description": "Ref to compare the working tree against. Empty: the merge base with origin/HEAD, else main, else master."
+    },
+    "agent_review": {
+      "type": "string",
+      "title": "Agent review",
+      "description": "before-push: the first push of each version of the changes is held back while Claude runs a review guided by brisk's plan. after-turn: also starts that review when Claude's turn ends. off: no review.",
+      "default": "before-push"
+    },
+    "ask_person": {
+      "type": "string",
+      "title": "Ask a person",
+      "description": "When brisk asks for a person: ask (show the questions after the turn, and ask in the permission prompt before a push), note (show the questions only), or off.",
+      "default": "ask"
+    },
+    "confirm_unassessed": {
+      "type": "boolean",
+      "title": "Confirm unassessed pushes",
+      "description": "Ask a person before a push when brisk could not assess the changes.",
+      "default": false
+    },
+    "openrouter_api_key": {
+      "type": "string",
+      "title": "OpenRouter API key",
+      "description": "Lets TypeSafe's Jev answer brisk's questions through OpenRouter. Each new version of the changes costs one or two calls. Empty: OPENROUTER_API_KEY from the environment, else rules only.",
+      "sensitive": true
+    }
+  }
+}

@@ -55,7 +55,7 @@ func runCLI(t *testing.T, args ...string) (int, string, string) {
 	t.Helper()
 	var out, errb bytes.Buffer
 	t.Setenv("OPENROUTER_API_KEY", "")
-	code := run(context.Background(), args, &out, &errb)
+	code := run(context.Background(), args, strings.NewReader(""), &out, &errb)
 	return code, out.String(), errb.String()
 }
 

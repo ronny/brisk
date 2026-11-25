@@ -1,0 +1,48 @@
+#!/bin/sh
+# Runs `brisk claude-code` with the hook input on stdin. The binary comes from
+# the plugin's `binary` option (CLAUDE_PLUGIN_OPTION_BINARY): a command name is
+# looked up on PATH, skipping relative entries and entries inside the project,
+# so the change being rated cannot supply the binary that rates it. A path must
+# be absolute (or ~/) and outside the project.
+set -uf # -f: no globbing of PATH entries
+bin=${CLAUDE_PLUGIN_OPTION_BINARY:-brisk}
+project=${CLAUDE_PROJECT_DIR:-$PWD}
+project=${project%/}
+
+inside() { case $1 in "$project" | "$project"/*) return 0 ;; esac; return 1; }
+
+case $bin in
+  "~/"*) bin=${HOME:?brisk: HOME is not set}/${bin#"~/"} ;;
+esac
+case $bin in
+  /*)
+    if inside "$bin"; then
+      echo "brisk: the binary option points inside the project; set an absolute path outside it" >&2
+      exit 1
+    fi
+    ;;
+  */* | "")
+    echo "brisk: the binary option must be a command name or an absolute path" >&2
+    exit 1
+    ;;
+  *)
+    found=
+    old_ifs=$IFS
+    IFS=:
+    for dir in $PATH; do
+      case $dir in /*) ;; *) continue ;; esac
+      if inside "$dir"; then continue; fi
+      if [ -f "$dir/$bin" ] && [ -x "$dir/$bin" ]; then
+        found=$dir/$bin
+        break
+      fi
+    done
+    IFS=$old_ifs
+    if [ -z "$found" ]; then
+      echo "brisk: no $bin on PATH outside the project; install brisk or set the plugin's binary option" >&2
+      exit 1
+    fi
+    bin=$found
+    ;;
+esac
+exec "$bin" claude-code

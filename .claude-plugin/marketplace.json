@@ -1,0 +1,12 @@
+{
+  "name": "brisk",
+  "owner": { "name": "Ronny Haryanto", "url": "https://github.com/ronny" },
+  "description": "brisk tells you which changes made by a coding agent need a person to look at them.",
+  "plugins": [
+    {
+      "name": "brisk",
+      "source": "./adapters/claude-code",
+      "description": "Assesses Claude's changes after every turn, runs one agent review before a push, and asks a person when brisk says so."
+    }
+  ]
+}
